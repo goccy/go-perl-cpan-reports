@@ -35,6 +35,12 @@
 //	                   (failures.jsonl, failures.md) and, given a run of
 //	                   perl itself in the same harness (-reference-data,
 //	                   -reference-run), how the two compare
+//	cpancompat refset  write the CPAN snapshot and the reference set of a
+//	                   data directory into the results directory, the
+//	                   files the repository keeps (-results)
+//	cpancompat export  write a run into the results directory: what was
+//	                   measured and how (meta.json), its results, its
+//	                   failure records and the end of each failing log
 //
 // The data directory is given with -data or the CPANCOMPAT_DATA
 // environment variable.
@@ -60,6 +66,11 @@ func usage() {
                     [-test-limit duration] [-interpreter label] [-redo outcome,...]
   cpancompat report [-data dir] -run name
                     [-reference-data dir -reference-run name]
+  cpancompat refset [-data dir] -results dir
+  cpancompat export [-data dir] -run name -results dir -interpreter-name name
+                    [-interpreter-version v] [-interpreter-commit c]
+                    [-base-image image] [-compared-with run]
+                    [-provisional -note text] [-invocations file]
 `)
 	os.Exit(2)
 }
@@ -86,6 +97,15 @@ func main() {
 	redo := fs.String("redo", "", "run: outcomes to run again (comma separated) instead of keeping their recorded result")
 	referenceData := fs.String("reference-data", "", "report: the data directory of a run of perl itself to compare with")
 	referenceRunName := fs.String("reference-run", "", "report: the name of that run")
+	results := fs.String("results", "", "refset, export: the results directory the repository keeps")
+	interpreterName := fs.String("interpreter-name", "", "export: the interpreter the run measured (go-perl or perl)")
+	interpreterVersion := fs.String("interpreter-version", "", "export: its version")
+	interpreterCommit := fs.String("interpreter-commit", "", "export: the revision it was built from")
+	baseImage := fs.String("base-image", "", "export: the image the survey image was built on")
+	comparedWith := fs.String("compared-with", "", "export: the run of perl itself this run is compared with")
+	provisional := fs.Bool("provisional", false, "export: the run is provisional")
+	note := fs.String("note", "", "export: what the run is, in a sentence or two")
+	invocations := fs.String("invocations", "", "export: a JSON array of the invocations of a run made before run recorded them")
 	_ = fs.Parse(os.Args[2:])
 	if *data == "" {
 		fmt.Fprintln(os.Stderr, "cpancompat: no data directory (-data or CPANCOMPAT_DATA)")
@@ -132,6 +152,21 @@ func main() {
 			usage()
 		}
 		err = report(*data, *run, referenceRun{dataDir: *referenceData, run: *referenceRunName}, os.Stdout)
+	case "refset":
+		if *results == "" {
+			usage()
+		}
+		err = exportReferenceSet(*data, *results)
+	case "export":
+		if *run == "" || *results == "" {
+			usage()
+		}
+		err = exportRun(exportOptions{
+			dataDir: *data, run: *run, results: *results,
+			interpreter: interpreterMeta{Name: *interpreterName, Version: *interpreterVersion, Commit: *interpreterCommit},
+			baseImage:   *baseImage, provisional: *provisional, note: *note, comparedWith: *comparedWith,
+			invocations: *invocations,
+		})
 	default:
 		usage()
 	}

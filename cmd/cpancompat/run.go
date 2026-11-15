@@ -152,7 +152,7 @@ type runOptions struct {
 // result records, and a run continued or redone with other settings has
 // more than one line.
 type invocation struct {
-	Started string `json:"started"`
+	Started string `json:"started,omitempty"`
 	Image   string `json:"image"`
 	// Platform is the operating system and architecture of the machine
 	// that runs the containers, as Docker names them (linux/arm64).
