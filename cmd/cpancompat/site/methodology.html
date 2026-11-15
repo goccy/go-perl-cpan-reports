@@ -65,8 +65,8 @@ distribution gets a container of its own, made from one image:</p>
 </div>
 <p>A distribution whose requirements are not all met is still built and tested, as CPAN.pm does. When it fails
 while a requirement it computed is unmet, it waits for the distribution that provides the requirement and runs
-again once that one has finished (up to four attempts). A distribution installs whenever it builds, whatever its
-tests say, as a smoker that installs after testing does.</p>
+again once that one has finished (up to four attempts). A distribution is installed whenever it builds, whatever
+its tests say, so that the distributions that need it can be tried.</p>
 </section>
 
 <section id="outcomes">
