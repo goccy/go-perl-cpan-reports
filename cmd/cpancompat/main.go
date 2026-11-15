@@ -27,8 +27,12 @@
 //	                   writable directory of this machine, kept from the
 //	                   LAN and the hosts around them, and without network
 //	                   while they test
-//	cpancompat report  summarize a run: outcomes, and coverage against the
-//	                   distributions that pass on perl
+//	cpancompat report  summarize a run: outcomes, coverage against the
+//	                   distributions that pass on perl, why each
+//	                   distribution that did not pass failed
+//	                   (failures.jsonl, failures.md) and, given a run of
+//	                   perl itself in the same harness (-reference-data,
+//	                   -reference-run), how the two compare
 //
 // The data directory is given with -data or the CPANCOMPAT_DATA
 // environment variable.
@@ -53,6 +57,7 @@ func usage() {
                     [-jobs n] [-cpus n] [-memory size] [-wall duration]
                     [-interpreter label] [-redo outcome,...]
   cpancompat report [-data dir] -run name
+                    [-reference-data dir -reference-run name]
 `)
 	os.Exit(2)
 }
@@ -76,6 +81,8 @@ func main() {
 	wall := fs.Duration("wall", 2*time.Hour, "run: how long one container may run")
 	interpreter := fs.String("interpreter", "", "run: a label for the interpreter build, kept in every result")
 	redo := fs.String("redo", "", "run: outcomes to run again (comma separated) instead of keeping their recorded result")
+	referenceData := fs.String("reference-data", "", "report: the data directory of a run of perl itself to compare with")
+	referenceRunName := fs.String("reference-run", "", "report: the name of that run")
 	_ = fs.Parse(os.Args[2:])
 	if *data == "" {
 		fmt.Fprintln(os.Stderr, "cpancompat: no data directory (-data or CPANCOMPAT_DATA)")
@@ -118,7 +125,10 @@ func main() {
 		if *run == "" {
 			usage()
 		}
-		err = report(*data, *run, os.Stdout)
+		if (*referenceData == "") != (*referenceRunName == "") {
+			usage()
+		}
+		err = report(*data, *run, referenceRun{dataDir: *referenceData, run: *referenceRunName}, os.Stdout)
 	default:
 		usage()
 	}
