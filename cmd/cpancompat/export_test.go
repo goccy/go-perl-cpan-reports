@@ -173,9 +173,19 @@ func TestExportAndReadPublished(t *testing.T) {
 		t.Errorf("exporting again changed %s", failuresGzFile)
 	}
 
-	// A run of another snapshot does not go into the same results.
+	// A run of another snapshot does not go into the same results, and
+	// another snapshot does not replace the one its runs were measured on.
 	writeFiles(t, subject, map[string]string{snapshotFile: `{"packages_sha256":"other"}`})
 	if err := exportRun(opts); err == nil {
 		t.Errorf("a run of another snapshot was exported")
+	}
+	if err := exportReferenceSet(subject, results); err == nil {
+		t.Errorf("the snapshot of the results was replaced while a run of it is there")
+	}
+	if err := os.RemoveAll(filepath.Join(results, "sub")); err != nil {
+		t.Fatal(err)
+	}
+	if err := exportReferenceSet(subject, results); err != nil {
+		t.Errorf("replacing the snapshot of results without runs: %v", err)
 	}
 }

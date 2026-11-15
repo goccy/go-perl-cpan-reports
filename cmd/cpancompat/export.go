@@ -139,6 +139,16 @@ func exportReferenceSet(dataDir, results string) error {
 	if err != nil {
 		return err
 	}
+	if old, err := readPublishedSnapshot(results); err == nil && (old.PackagesSHA256 != ps.PackagesSHA256 || old.Perl != ps.Perl) {
+		// The runs there were measured on the snapshot being replaced.
+		p, err := readPublished(results)
+		if err != nil {
+			return err
+		}
+		if len(p.runs) > 0 {
+			return fmt.Errorf("refset: %s holds runs of another snapshot; remove them first", results)
+		}
+	}
 	if err := os.MkdirAll(results, 0o755); err != nil {
 		return err
 	}
