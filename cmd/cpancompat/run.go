@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -141,6 +143,91 @@ type runOptions struct {
 	cpus        string
 	memory      string
 	wall        time.Duration
+	// testLimit is how long a distribution's test phase may run.
+	testLimit time.Duration
+}
+
+// invocation is one line of runs/<name>/invocations.jsonl: what one
+// `cpancompat run` of the run was started with. The settings are facts no
+// result records, and a run continued or redone with other settings has
+// more than one line.
+type invocation struct {
+	Started string `json:"started"`
+	Image   string `json:"image"`
+	// Platform is the operating system and architecture of the machine
+	// that runs the containers, as Docker names them (linux/arm64).
+	Platform    string         `json:"platform,omitempty"`
+	Interpreter string         `json:"interpreter,omitempty"`
+	Harness     harnessVersion `json:"harness"`
+	Jobs        int            `json:"jobs"`
+	CPUs        string         `json:"cpus"`
+	Memory      string         `json:"memory"`
+	WallSeconds int            `json:"wall_seconds"`
+	TestSeconds int            `json:"test_seconds"`
+	Top         int            `json:"top,omitempty"`
+	Dists       []string       `json:"dists,omitempty"`
+	Redo        []string       `json:"redo,omitempty"`
+}
+
+// harnessVersion identifies the program that drove a run: its module and
+// the version control revision it was built from.
+type harnessVersion struct {
+	Module   string `json:"module"`
+	Revision string `json:"revision,omitempty"`
+	// Modified: the working tree it was built from had changes.
+	Modified bool `json:"modified,omitempty"`
+}
+
+// thisHarness is the version of this program, as far as its build
+// information tells (go build in a checkout records the revision).
+func thisHarness() harnessVersion {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return harnessVersion{}
+	}
+	h := harnessVersion{Module: info.Main.Path}
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			h.Revision = s.Value
+		case "vcs.modified":
+			h.Modified = s.Value == "true"
+		}
+	}
+	return h
+}
+
+// recordInvocation appends what this invocation runs with to the run's
+// invocations.jsonl.
+func recordInvocation(opts runOptions) error {
+	inv := invocation{
+		Started: time.Now().UTC().Format(time.RFC3339), Image: opts.image, Interpreter: opts.interpreter,
+		Harness: thisHarness(), Jobs: opts.jobs, CPUs: opts.cpus, Memory: opts.memory,
+		WallSeconds: int(opts.wall / time.Second), TestSeconds: int(opts.testLimit / time.Second),
+		Top: opts.top, Dists: opts.only,
+	}
+	for outcome := range opts.redo {
+		inv.Redo = append(inv.Redo, outcome)
+	}
+	sort.Strings(inv.Redo)
+	out, err := exec.Command("docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}").Output()
+	if err != nil {
+		return fmt.Errorf("docker version: %w", err)
+	}
+	inv.Platform = strings.TrimSpace(string(out))
+	line, err := json.Marshal(inv)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(opts.dataDir, "runs", opts.run, "invocations.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // maxAttempts bounds how often a distribution is run again because it
@@ -242,6 +329,9 @@ func runSurvey(opts runOptions) error {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(r.runDir, "work"), 0o755); err != nil {
+		return err
+	}
+	if err := recordInvocation(opts); err != nil {
 		return err
 	}
 	resultsPath := filepath.Join(r.runDir, "results.jsonl")
@@ -574,7 +664,8 @@ func (r *runner) attempt(d *dist, attempts, seq int) *result {
 		"-v", r.volume+":/opt/gperl/local",
 		"-v", r.buildVolume+":/work",
 		"-v", r.archives+":/archives:ro",
-		r.opts.image, "bash", "/opt/cpancompat/dist.sh", "/archives/"+d.Path, mode)
+		r.opts.image, "bash", "/opt/cpancompat/dist.sh", "/archives/"+d.Path, mode,
+		strconv.Itoa(int(r.opts.testLimit/time.Second)))
 	cmd.Cancel = func() error { return exec.Command("docker", "kill", name).Run() }
 	// What docker run prints goes to container.log once the records are
 	// copied out: the directory is the container's until then.

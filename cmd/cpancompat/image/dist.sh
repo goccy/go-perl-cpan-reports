@@ -17,11 +17,13 @@
 # can, and dist.sh checks that no interface but loopback is left. The
 # "offline" record before the test phase's says so.
 #
-# usage: dist.sh <archive> <build|shipped>
+# usage: dist.sh <archive> <build|shipped> [test limit in seconds]
 #
 # "build" is the normal course. "shipped" is for a distribution the
 # interpreter itself ships at the same or a newer version: nothing is built
 # or installed, and its test files run against the interpreter's own copy.
+# The test phase may run for the given number of seconds (1200 when none is
+# given); every other phase has a limit of its own below.
 #
 # It runs as the image's unprivileged user, in that user's login
 # environment. The distribution is unpacked into a directory of its own
@@ -37,6 +39,7 @@
 set -u
 archive=$1
 mode=$2
+test_limit=${3:-1200}
 out=/out
 stage=/stage
 dest=/opt/gperl/local
@@ -210,7 +213,7 @@ if [ "$mode" = shipped ]; then
     fi
     offline || exit 0
     # shellcheck disable=SC2086  # the list is a set of glob patterns
-    PERL5LIB=$PERL5LIB:$tools/lib phase test 1200 "${xvfb[@]}" \
+    PERL5LIB=$PERL5LIB:$tools/lib phase test "$test_limit" "${xvfb[@]}" \
         perl -MExtUtils::Command::MM -MTest::Harness -e 'undef *Test::Harness::Switches; test_harness(0)' $files
     exit 0
 fi
@@ -223,7 +226,7 @@ stagelib=$stage$dest/lib/perl5
 if [ "$builder" = Makefile.PL ]; then
     phase build 1800 make || exit 0
     offline || exit 0
-    PERL5LIB=$PERL5LIB:$tools/lib phase test 1200 "${xvfb[@]}" make test
+    PERL5LIB=$PERL5LIB:$tools/lib phase test "$test_limit" "${xvfb[@]}" make test
     # DESTDIR ends in a slash: ExtUtils::MakeMaker prefixes it to each
     # installation directory as text, and a distribution that names its
     # own manual pages still installs them to the directory "none" that
@@ -233,7 +236,7 @@ if [ "$builder" = Makefile.PL ]; then
 else
     phase build 1800 ./Build || exit 0
     offline || exit 0
-    PERL5LIB=$PERL5LIB:$tools/lib phase test 1200 "${xvfb[@]}" ./Build test
+    PERL5LIB=$PERL5LIB:$tools/lib phase test "$test_limit" "${xvfb[@]}" ./Build test
     PERL5LIB=$stagelib:$PERL5LIB phase install 600 ./Build install --destdir $stage || exit 0
 fi
 

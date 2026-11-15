@@ -20,8 +20,10 @@
 //	                   reference the interpreter is compared with)
 //	cpancompat run     configure, build, test and install distributions on
 //	                   go-perl, in dependency order, one container each;
-//	                   results accumulate in runs/<name>/results.jsonl and
-//	                   an interrupted run continues where it stopped. The
+//	                   results accumulate in runs/<name>/results.jsonl (and
+//	                   the settings of every invocation in
+//	                   invocations.jsonl), and an interrupted run continues
+//	                   where it stopped. The
 //	                   containers run CPAN code, which may be malicious: as
 //	                   an unprivileged user without capabilities, with no
 //	                   writable directory of this machine, kept from the
@@ -55,7 +57,7 @@ func usage() {
   cpancompat image  [-data dir] (-gperl binary | -perl-image image) [-image tag]
   cpancompat run    [-data dir] -run name [-image tag] [-top n | -dists a,b,...]
                     [-jobs n] [-cpus n] [-memory size] [-wall duration]
-                    [-interpreter label] [-redo outcome,...]
+                    [-test-limit duration] [-interpreter label] [-redo outcome,...]
   cpancompat report [-data dir] -run name
                     [-reference-data dir -reference-run name]
 `)
@@ -79,6 +81,7 @@ func main() {
 	cpus := fs.String("cpus", "2", "run: CPUs of each container")
 	memory := fs.String("memory", "2g", "run: memory of each container")
 	wall := fs.Duration("wall", 2*time.Hour, "run: how long one container may run")
+	testLimit := fs.Duration("test-limit", 20*time.Minute, "run: how long the test phase of one distribution may run (whole seconds)")
 	interpreter := fs.String("interpreter", "", "run: a label for the interpreter build, kept in every result")
 	redo := fs.String("redo", "", "run: outcomes to run again (comma separated) instead of keeping their recorded result")
 	referenceData := fs.String("reference-data", "", "report: the data directory of a run of perl itself to compare with")
@@ -110,7 +113,7 @@ func main() {
 		opts := runOptions{
 			dataDir: *data, run: *run, image: *image, interpreter: *interpreter,
 			top: *top, jobs: *jobs, cpus: *cpus, memory: *memory, wall: *wall,
-			redo: map[string]bool{},
+			testLimit: *testLimit, redo: map[string]bool{},
 		}
 		if *only != "" {
 			opts.only = strings.Split(*only, ",")
