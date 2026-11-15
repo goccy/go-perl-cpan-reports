@@ -41,9 +41,12 @@
 //	cpancompat export  write a run into the results directory: what was
 //	                   measured and how (meta.json), its results, its
 //	                   failure records and the end of each failing log
+//	cpancompat site    generate the static site of a results directory
+//	                   (-results) into a directory (-out), and serve it
+//	                   (-serve address)
 //
-// The data directory is given with -data or the CPANCOMPAT_DATA
-// environment variable.
+// The data directory, which every command but site works in, is given with
+// -data or the CPANCOMPAT_DATA environment variable.
 package main
 
 import (
@@ -71,6 +74,7 @@ func usage() {
                     [-interpreter-version v] [-interpreter-commit c]
                     [-base-image image] [-compared-with run]
                     [-provisional -note text] [-invocations file]
+  cpancompat site   -results dir -out dir [-serve address]
 `)
 	os.Exit(2)
 }
@@ -97,7 +101,9 @@ func main() {
 	redo := fs.String("redo", "", "run: outcomes to run again (comma separated) instead of keeping their recorded result")
 	referenceData := fs.String("reference-data", "", "report: the data directory of a run of perl itself to compare with")
 	referenceRunName := fs.String("reference-run", "", "report: the name of that run")
-	results := fs.String("results", "", "refset, export: the results directory the repository keeps")
+	results := fs.String("results", "", "refset, export, site: the results directory the repository keeps")
+	out := fs.String("out", "", "site: the directory to write the site into (replaced)")
+	serve := fs.String("serve", "", "site: serve the site at this address (e.g. localhost:8000) once it is written")
 	interpreterName := fs.String("interpreter-name", "", "export: the interpreter the run measured (go-perl or perl)")
 	interpreterVersion := fs.String("interpreter-version", "", "export: its version")
 	interpreterCommit := fs.String("interpreter-commit", "", "export: the revision it was built from")
@@ -107,7 +113,7 @@ func main() {
 	note := fs.String("note", "", "export: what the run is, in a sentence or two")
 	invocations := fs.String("invocations", "", "export: a JSON array of the invocations of a run made before run recorded them")
 	_ = fs.Parse(os.Args[2:])
-	if *data == "" {
+	if *data == "" && os.Args[1] != "site" {
 		fmt.Fprintln(os.Stderr, "cpancompat: no data directory (-data or CPANCOMPAT_DATA)")
 		os.Exit(2)
 	}
@@ -167,6 +173,13 @@ func main() {
 			baseImage:   *baseImage, provisional: *provisional, note: *note, comparedWith: *comparedWith,
 			invocations: *invocations,
 		})
+	case "site":
+		if *results == "" || *out == "" {
+			usage()
+		}
+		if err = generateSite(*results, *out); err == nil && *serve != "" {
+			err = serveSite(*out, *serve)
+		}
 	default:
 		usage()
 	}
