@@ -32,7 +32,9 @@
 //	cpancompat report  summarize a run: outcomes, coverage against the
 //	                   distributions that pass on perl, why each
 //	                   distribution that did not pass failed
-//	                   (failures.jsonl, failures.md) and, given a run of
+//	                   (failures.jsonl, failures.md; for a go-perl run,
+//	                   -interpreter-name go-perl, with the causes analysis
+//	                   recorded in known-causes.json) and, given a run of
 //	                   perl itself in the same harness (-reference-data,
 //	                   -reference-run), how the two compare
 //	cpancompat refset  write the CPAN snapshot and the reference set of a
@@ -67,7 +69,7 @@ func usage() {
   cpancompat run    [-data dir] -run name [-image tag] [-top n | -dists a,b,...]
                     [-jobs n] [-cpus n] [-memory size] [-wall duration]
                     [-test-limit duration] [-interpreter label] [-redo outcome,...]
-  cpancompat report [-data dir] -run name
+  cpancompat report [-data dir] -run name [-interpreter-name name]
                     [-reference-data dir -reference-run name]
   cpancompat refset [-data dir] -results dir
   cpancompat export [-data dir] -run name -results dir -interpreter-name name
@@ -104,7 +106,7 @@ func main() {
 	results := fs.String("results", "", "refset, export, site: the results directory the repository keeps")
 	out := fs.String("out", "", "site: the directory to write the site into (replaced)")
 	serve := fs.String("serve", "", "site: serve the site at this address (e.g. localhost:8000) once it is written")
-	interpreterName := fs.String("interpreter-name", "", "export: the interpreter the run measured (go-perl or perl)")
+	interpreterName := fs.String("interpreter-name", "", "report, export: the interpreter the run measured (go-perl or perl); the known causes apply to go-perl runs only")
 	interpreterVersion := fs.String("interpreter-version", "", "export: its version")
 	interpreterCommit := fs.String("interpreter-commit", "", "export: the revision it was built from")
 	baseImage := fs.String("base-image", "", "export: the image the survey image was built on")
@@ -157,7 +159,7 @@ func main() {
 		if (*referenceData == "") != (*referenceRunName == "") {
 			usage()
 		}
-		err = report(*data, *run, referenceRun{dataDir: *referenceData, run: *referenceRunName}, os.Stdout)
+		err = report(*data, *run, *interpreterName, referenceRun{dataDir: *referenceData, run: *referenceRunName}, os.Stdout)
 	case "refset":
 		if *results == "" {
 			usage()

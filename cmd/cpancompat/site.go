@@ -81,16 +81,34 @@ type siteData struct {
 	Runs       []*siteRun
 	Comparison *comparison
 	Causes     []causeCount
-	set        []refDist
-	inSet      map[string]*refDist
-	pages      map[string]string
+	// ForkLimitation is the known limitation of fork in go-perl as the
+	// subject run shows it; nil when the subject is not a go-perl run.
+	ForkLimitation *knownLimitation
+	set            []refDist
+	inSet          map[string]*refDist
+	pages          map[string]string
+	// known are the entries of known-causes.json, by distribution.
+	known map[string]*knownCause
+}
+
+// knownLimitation is a known limitation of the subject run's interpreter:
+// its cause and the distributions whose failure in the run is put down to
+// it, of which InReference are in the reference set.
+type knownLimitation struct {
+	Cause       cause
+	Dists       []string
+	InReference int
 }
 
 // buildSiteData chooses the runs the site is about: the latest run that is
 // compared with a run of perl (by its last result), or the latest run when
 // none is.
 func buildSiteData(p *published) (*siteData, error) {
-	s := &siteData{Snapshot: p.snapshot, set: p.set, inSet: map[string]*refDist{}}
+	known, err := knownCauses()
+	if err != nil {
+		return nil, err
+	}
+	s := &siteData{Snapshot: p.snapshot, set: p.set, inSet: map[string]*refDist{}, known: known}
 	for i := range p.set {
 		s.inSet[p.set[i].Dist] = &p.set[i]
 	}
@@ -135,6 +153,20 @@ func buildSiteData(p *published) (*siteData, error) {
 		s.Comparison = &c
 	}
 	s.Causes = causeCounts(p.set, s.Subject.data, refData)
+	if s.Subject.Meta.Interpreter.Name == interpreterGoPerl {
+		l := &knownLimitation{Cause: causeForkSharesNativeMemory}
+		for name, f := range s.Subject.data.failures {
+			if f.Cause != l.Cause {
+				continue
+			}
+			l.Dists = append(l.Dists, name)
+			if s.inSet[name] != nil {
+				l.InReference++
+			}
+		}
+		sort.Strings(l.Dists)
+		s.ForkLimitation = l
+	}
 
 	// A page for every distribution of the reference set and every one a
 	// run recorded.
@@ -267,7 +299,10 @@ type distRunView struct {
 	Run     *siteRun
 	Result  *result
 	Failure *failure
-	Log     *logExcerpt
+	// Known is the entry of known-causes.json the failure's cause comes
+	// from; nil when its cause is the one its log tells.
+	Known *knownCause
+	Log   *logExcerpt
 	// Blocks names the distributions that name this one as blocking them
 	// in the run.
 	Blocks []string
@@ -285,11 +320,14 @@ func (s *siteData) distView(name string) distView {
 			continue
 		}
 		rv := distRunView{Run: r, Result: r.data.latest[name], Failure: r.data.failures[name], Log: r.logs[name], Blocks: r.blocks[name]}
+		if k := s.known[name]; k != nil && rv.Failure != nil && rv.Failure.Cause == k.Cause {
+			rv.Known = k
+		}
 		if rv.Result != nil {
 			rv.Unmet = rv.Result.Unmet
 			rv.TestFiles = len(rv.Result.Tests)
 			for _, t := range rv.Result.Tests {
-				if t.Failed > 0 || t.Exit != 0 || t.Problems {
+				if t.failed() {
 					rv.FailingTests++
 				}
 			}

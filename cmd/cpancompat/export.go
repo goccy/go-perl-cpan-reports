@@ -206,7 +206,7 @@ func exportRun(opts exportOptions) error {
 		return fmt.Errorf("export: %s was measured on another snapshot or reference set than the one in %s", opts.dataDir, opts.results)
 	}
 
-	rd, err := loadRun(opts.dataDir, opts.run, dists)
+	rd, err := loadRun(opts.dataDir, opts.run, opts.interpreter.Name, dists)
 	if err != nil {
 		return err
 	}
@@ -545,10 +545,15 @@ type published struct {
 }
 
 // readPublished reads a results directory: its snapshot, its reference set
-// and every run (every directory with a meta.json).
+// and every run (every directory with a meta.json). The known causes are
+// applied to the runs as export applies them, so that a run exported before
+// an entry was recorded is shown with it.
 func readPublished(results string) (*published, error) {
 	p := &published{runs: map[string]*publishedRun{}}
-	var err error
+	known, err := knownCauses()
+	if err != nil {
+		return nil, err
+	}
 	if p.snapshot, err = readPublishedSnapshot(results); err != nil {
 		return nil, err
 	}
@@ -598,6 +603,7 @@ func readPublished(results string) (*published, error) {
 			latest[i] = &results[i]
 		}
 		pr.data = newRunData(e.Name(), latest, failures)
+		pr.data.applyKnownCauses(known, pr.meta.Interpreter.Name)
 		for i := range logs {
 			pr.logs[logs[i].Dist] = &logs[i]
 		}

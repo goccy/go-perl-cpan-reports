@@ -177,7 +177,7 @@ func TestReport(t *testing.T) {
 		{Dist: "C", Outcome: outcomePass}, {Dist: "Lib", Outcome: outcomePass},
 	}, nil)
 	var out bytes.Buffer
-	if err := report(subject, "sub", referenceRun{dataDir: reference, run: "ref"}, &out); err != nil {
+	if err := report(subject, "sub", interpreterGoPerl, referenceRun{dataDir: reference, run: "ref"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{

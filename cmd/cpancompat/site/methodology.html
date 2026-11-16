@@ -101,6 +101,12 @@ this is done by the patterns of their messages:</p>
   <li>A phase that ran out of time is classified by what its processes were doing 15 seconds before the limit:
   waiting without using the CPU (blocked), one program on the CPU for minutes (spinning), or a program that started
   recently on the CPU (slow: still going through its test files).</li>
+  <li>A <strong>known limitation</strong> of go-perl that the logs cannot tell reliably is given by analysis
+  instead: the repository records, for each distribution, the test files the analysis tied to it and the evidence
+  (<code>cmd/cpancompat/known-causes.json</code>). In a go-perl run, a distribution whose tests failed takes that
+  cause when every test file that failed is one of those; otherwise the cause its log tells stands. Runs of perl
+  itself never take it.{{if $s.ForkLimitation}} <a href="index.html#known-limitations">The known
+  limitations</a>.{{end}}</li>
   <li>Every distribution gets a cause; when nothing above applies, it is <em>not analysed</em>.</li>
 </ol>
 <div class="table-wrap">

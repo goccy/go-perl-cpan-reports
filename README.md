@@ -33,6 +33,9 @@ test phase of a distribution limited to five minutes, on linux/arm64.
 cmd/cpancompat/          the survey tool (one command, cpancompat)
 cmd/cpancompat/image/    the files of the container images distributions are tested in
 cmd/cpancompat/site/     the templates and assets of the site
+cmd/cpancompat/known-causes.json
+                         causes found by analysis where the logs cannot tell them
+                         (see "Known causes")
 results/                 the results the site is generated from
 .github/workflows/       the workflow that publishes the site
 Makefile                 a survey from start to end
@@ -72,6 +75,61 @@ results/<run>/logs.jsonl.gz     the end of the failing phase's log of each of th
 The files are gzip-compressed JSON lines. The records hold no path of the machine a
 run was made on: `export` replaces the data directory's path and cuts paths below the
 home directory short.
+
+### Known causes
+
+`report` reads the cause of each failure from the log of its failing phase, by the
+patterns of the messages in it. One class of failures cannot be told that way: a known
+limitation of go-perl. gperl runs a `fork` child as a pseudo-process, the way perl does
+on Windows: the interpreter's memory is copied and the child runs on a goroutine of the
+same OS process, but the memory native (XS) modules allocate in C is not copied, so parent
+and child share it (DBI handles' C structs, SSL contexts, libev loops, the modules' own
+objects). When the child frees or changes that state, the parent uses or frees it again:
+double frees, use after free, wrong answers. One virtual address can only refer to one
+memory at a time, so this cannot be fixed within one process; perl itself, with a real
+fork, and pure-Perl code are not affected. A fault on a fork child might be told apart
+in a log, but a fault in the parent after a child ended cannot. So these failures are
+attributed by analysis and recorded as data in `cmd/cpancompat/known-causes.json`, a
+JSON array with one entry per distribution:
+
+```json
+{
+  "dist": "XS-Logger",
+  "cause": "fork-shares-native-memory",
+  "tests": ["t/fork.t"],
+  "evidence": "Its C logger object is shared with the child: the child logs and exits, and the parent's next log call faults (segmentation fault in the parent after the child ended)."
+}
+```
+
+| field | what it holds |
+|---|---|
+| `dist` | the distribution's name; one entry per distribution |
+| `cause` | the cause id: only causes no log pattern gives are accepted, at present `fork-shares-native-memory` |
+| `tests` | the test files the analysis attributed to the cause |
+| `evidence` | what ties them to it, in a sentence or two: for this cause, which native object is shared, and whether the fault is on the fork child or in the parent after the child ended |
+
+The file is built into `cpancompat`. `report -interpreter-name go-perl`, `export
+-interpreter-name go-perl` and `site` (for a run exported as go-perl) give a
+distribution its entry's cause only when its tests failed (outcome `fail`) and every
+test file that failed in the run is among the entry's `tests`. Otherwise the cause its
+log tells stands: a distribution that also failed in another test file, ran out of time,
+did not build or was blocked is never relabelled, and neither is any run of perl. `site`
+applies the file to the runs it reads, so an entry added after a run was exported shows
+on the site at once; `export` writes the cause into the records, so after an entry is
+narrowed or removed, export the run again.
+
+Justify every entry from the survey's records and logs, or from a reproduction:
+
+- List a test file only when the evidence ties it to the cause: a fault on a fork child
+  (in the Go traceback of the log, the faulting goroutine is not goroutine 1, the main
+  one, and runs native code), or a fault or wrong answer in the parent after the child
+  ended (the log or the test shows the child had ended, for example the assertion after
+  `waitpid`), on an object both share.
+- Leave out the test files that fail for another reason, even in the same distribution,
+  and the distributions of which no test file can be tied.
+- Write the evidence in the entry: the native object shared, and where the fault is.
+  Keep it free of paths of your machine and of anything that only means something in
+  your own notes.
 
 ## Viewing the site locally
 

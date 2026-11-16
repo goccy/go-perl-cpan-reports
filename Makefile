@@ -106,10 +106,13 @@ run-gperl: $(CPANCOMPAT) require-commit
 	$(CPANCOMPAT) run -data $(DATA) -run $(RUN) -image $(IMAGE) -interpreter go-perl@$(GPERL_SHORT) \
 		-jobs $(JOBS) -cpus $(CPUS) -memory $(MEMORY) -test-limit $(TEST_LIMIT)
 
-# Text reports, failures.jsonl and failures.md in each run's directory.
+# Text reports, failures.jsonl and failures.md in each run's directory. The
+# interpreter names decide where the known causes (known-causes.json) apply:
+# to the go-perl run only.
 report: $(CPANCOMPAT) require-commit
-	$(CPANCOMPAT) report -data $(REF_DATA) -run $(REF_RUN)
-	$(CPANCOMPAT) report -data $(DATA) -run $(RUN) -reference-data $(REF_DATA) -reference-run $(REF_RUN)
+	$(CPANCOMPAT) report -data $(REF_DATA) -run $(REF_RUN) -interpreter-name perl
+	$(CPANCOMPAT) report -data $(DATA) -run $(RUN) -interpreter-name go-perl \
+		-reference-data $(REF_DATA) -reference-run $(REF_RUN)
 
 export: $(CPANCOMPAT) require-commit
 	$(CPANCOMPAT) refset -data $(REF_DATA) -results $(RESULTS)

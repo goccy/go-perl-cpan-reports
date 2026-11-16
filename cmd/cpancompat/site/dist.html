@@ -14,7 +14,7 @@
 </dl>
 
 {{- range $v.Runs}}
-{{- $r := .Run}}
+{{- $r := .Run}}{{$known := .Known}}
 <section class="run">
 <h2>On {{$r.Label}}{{with $r.Meta.Interpreter.Version}} {{.}}{{end}} <span class="muted">run <code>{{$r.Name}}</code></span></h2>
 {{- with .Result}}
@@ -38,6 +38,10 @@
 {{- with .Failure}}
 <dl class="facts">
   <dt>cause</dt><dd>{{causeTitle .Cause}}</dd>
+  {{- with $known}}
+  <dt>analysis</dt><dd>{{.Evidence}} Attributed test files: {{range $i, $f := .Tests}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}}.
+    <a href="../index.html#known-limitations">About this limitation</a></dd>
+  {{- end}}
   {{- if .BlockedBy}}
   <dt>blocked by</dt><dd>{{range $i, $d := .BlockedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
   {{- end}}

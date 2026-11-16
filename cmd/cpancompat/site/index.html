@@ -113,7 +113,8 @@ the distributions that were run and did not install: those that block the most o
 <section>
 <h2>Causes</h2>
 <p>Why the reference distributions that did not pass on {{$sub.Label}} failed, the blocked ones left out, as the
-logs tell it (<a href="methodology.html#causes">how causes are decided</a>).</p>
+logs tell it{{if $s.ForkLimitation}}, or as analysis recorded it for a <a href="#known-limitations">known
+limitation</a>{{end}} (<a href="methodology.html#causes">how causes are decided</a>).</p>
 <div class="table-wrap">
 <table>
   <thead><tr><th>cause</th><th class="num">distributions</th>{{if $ref}}<th class="num">of them passing on {{$ref.Label}}</th>{{end}}</tr></thead>
@@ -124,6 +125,31 @@ logs tell it (<a href="methodology.html#causes">how causes are decided</a>).</p>
   </tbody>
 </table>
 </div>
+</section>
+{{- end}}
+
+{{- with $s.ForkLimitation}}
+<section id="known-limitations">
+<h2>Known limitations</h2>
+<h3>{{causeTitle .Cause}}</h3>
+<p>go-perl does not start a new process for <code>fork</code>. Like perl on Windows, it makes a pseudo-process:
+the interpreter's memory is copied, and the child runs on a goroutine of the same operating system process.
+Memory that native (XS) modules allocate in C is not part of the interpreter's memory, so it is not copied, and
+parent and child share it: the C structures behind DBI handles, SSL contexts, libev event loops, the modules' own
+objects. When the child frees or changes that state, the parent later uses or frees it again, which ends in double
+frees, use after free or wrong answers. This cannot be fixed within one process: one virtual address can only refer
+to one memory at a time. perl itself, whose <code>fork</code> makes a real process, is not affected, and neither is
+pure-Perl code.</p>
+<p>The logs cannot tell these failures apart reliably: a crash in the parent after a child ended looks like any
+other crash. So they are attributed by analysis, recorded in the repository
+(<code>cmd/cpancompat/known-causes.json</code>): for each distribution, the test files the analysis tied to this
+limitation and the evidence. A distribution takes this cause only when every test file that failed in the run is one
+of them; otherwise the cause its log tells stands.</p>
+<p>In run <code>{{$sub.Name}}</code>, {{num (len .Dists)}} distribution{{if ne (len .Dists) 1}}s{{end}} failed for
+this reason, {{num .InReference}} of them in the reference set{{if .Dists}}:{{else}}.{{end}}</p>
+{{- if .Dists}}
+<p>{{range $i, $d := .Dists}}{{if $i}}, {{end}}<a href="d/{{page $d}}">{{$d}}</a>{{end}}</p>
+{{- end}}
 </section>
 {{- end}}
 

@@ -64,9 +64,14 @@ type referenceRun struct {
 	dataDir, run string
 }
 
-// loadRun reads a run of dataDir: its last result per distribution and the
-// failure records of the ones that did not pass, built from its logs.
-func loadRun(dataDir, run string, dists []dist) (*runData, error) {
+// loadRun reads a run of dataDir, a run of interpreter: its last result per
+// distribution and the failure records of the ones that did not pass, built
+// from its logs, with the known causes applied (applyKnownCauses).
+func loadRun(dataDir, run, interpreter string, dists []dist) (*runData, error) {
+	known, err := knownCauses()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := readJSONLines[result](filepath.Join(dataDir, "runs", run, "results.jsonl"))
 	if err != nil {
 		return nil, err
@@ -80,15 +85,17 @@ func loadRun(dataDir, run string, dists []dist) (*runData, error) {
 	}
 	latest := latestResults(rows)
 	failures := failureRecords(filepath.Join(dataDir, "runs", run, "work"), latest, byName)
-	return newRunData(run, latest, failures), nil
+	rd := newRunData(run, latest, failures)
+	rd.applyKnownCauses(known, interpreter)
+	return rd, nil
 }
 
-// report summarizes a run: outcomes, coverage against the distributions
-// that pass on perl, what blocks the most, why each distribution that did
-// not pass failed, and, given a reference run, how the two compare. It
-// writes summary.json, failures.jsonl and failures.md into the run's
-// directory.
-func report(dataDir, run string, ref referenceRun, w io.Writer) error {
+// report summarizes a run of interpreter: outcomes, coverage against the
+// distributions that pass on perl, what blocks the most, why each
+// distribution that did not pass failed, and, given a reference run, how the
+// two compare. It writes summary.json, failures.jsonl and failures.md into
+// the run's directory.
+func report(dataDir, run, interpreter string, ref referenceRun, w io.Writer) error {
 	dists, err := readDists(filepath.Join(dataDir, "dists.jsonl"))
 	if err != nil {
 		return err
@@ -97,7 +104,7 @@ func report(dataDir, run string, ref referenceRun, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	rd, err := loadRun(dataDir, run, dists)
+	rd, err := loadRun(dataDir, run, interpreter, dists)
 	if err != nil {
 		return err
 	}
@@ -170,7 +177,7 @@ func report(dataDir, run string, ref referenceRun, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if refData, err = loadRun(ref.dataDir, ref.run, refDists); err != nil {
+		if refData, err = loadRun(ref.dataDir, ref.run, interpreterPerl, refDists); err != nil {
 			return err
 		}
 		c := compareRuns(set, rd, refData)

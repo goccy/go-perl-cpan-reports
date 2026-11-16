@@ -24,6 +24,12 @@ const (
 	// causeBlocked: a distribution providing a module it lacked did not
 	// install (the outcome blocked).
 	causeBlocked cause = "blocked"
+	// causeForkSharesNativeMemory: a known limitation of go-perl, which
+	// runs a fork child as a pseudo-process in the same OS process, so
+	// parent and child share the memory native modules allocate. The logs
+	// cannot tell it reliably: it is given by analysis, recorded in
+	// known-causes.json (known.go).
+	causeForkSharesNativeMemory cause = "fork-shares-native-memory"
 	// The causes the evidence lines tell, in the order they are tried.
 	causeExternalLibrary cause = "external-library"
 	causeOtherOS         cause = "other-os"
@@ -54,7 +60,7 @@ const (
 
 // causes lists every cause, in the order they are presented.
 var causes = []cause{
-	causeBlocked, causeExternalLibrary, causeOtherOS, causePerlHeader, causeCAPI,
+	causeBlocked, causeForkSharesNativeMemory, causeExternalLibrary, causeOtherOS, causePerlHeader, causeCAPI,
 	causeThreads, causeTLSOrPTY, causeModuleNotFound, causeINCUnreadable, causeCrash,
 	causeNetwork, causeOutputLimit, causeTimeLimitBlocked, causeTimeLimitSpinning,
 	causeTimeLimitSlow, causeTimeLimit, causeDeclined, causeNotAnalysed,
@@ -62,24 +68,25 @@ var causes = []cause{
 
 // causeTitles describes each cause in a few words.
 var causeTitles = map[cause]string{
-	causeBlocked:           "blocked by a distribution that did not install",
-	causeExternalLibrary:   "an external C library, header or tool is missing",
-	causeOtherOS:           "made for another operating system",
-	causePerlHeader:        "a perl header is missing",
-	causeCAPI:              "C compile or link errors against the perl API",
-	causeThreads:           "needs a perl with threads",
-	causeTLSOrPTY:          "TLS or a pseudo-terminal",
-	causeModuleNotFound:    "a module not found at run time",
-	causeINCUnreadable:     "@INC unreadable after dropping privileges",
-	causeCrash:             "a crash of native code or of the interpreter",
-	causeNetwork:           "network access",
-	causeOutputLimit:       "output limit: a phase wrote more than 256 MiB",
-	causeTimeLimitBlocked:  "time limit: blocked (waiting, no CPU)",
-	causeTimeLimitSpinning: "time limit: spinning (one program on the CPU for minutes)",
-	causeTimeLimitSlow:     "time limit: slow (still going through its test files)",
-	causeTimeLimit:         "time limit (not analysed)",
-	causeDeclined:          "declined by its own configure script (not analysed)",
-	causeNotAnalysed:       "not analysed",
+	causeBlocked:                "blocked by a distribution that did not install",
+	causeForkSharesNativeMemory: "fork: a pseudo-process child shares native memory with its parent (known limitation)",
+	causeExternalLibrary:        "an external C library, header or tool is missing",
+	causeOtherOS:                "made for another operating system",
+	causePerlHeader:             "a perl header is missing",
+	causeCAPI:                   "C compile or link errors against the perl API",
+	causeThreads:                "needs a perl with threads",
+	causeTLSOrPTY:               "TLS or a pseudo-terminal",
+	causeModuleNotFound:         "a module not found at run time",
+	causeINCUnreadable:          "@INC unreadable after dropping privileges",
+	causeCrash:                  "a crash of native code or of the interpreter",
+	causeNetwork:                "network access",
+	causeOutputLimit:            "output limit: a phase wrote more than 256 MiB",
+	causeTimeLimitBlocked:       "time limit: blocked (waiting, no CPU)",
+	causeTimeLimitSpinning:      "time limit: spinning (one program on the CPU for minutes)",
+	causeTimeLimitSlow:          "time limit: slow (still going through its test files)",
+	causeTimeLimit:              "time limit (not analysed)",
+	causeDeclined:               "declined by its own configure script (not analysed)",
+	causeNotAnalysed:            "not analysed",
 }
 
 // The causes the evidence lines tell, each by the patterns of the
@@ -277,7 +284,7 @@ func failureRecord(dir string, res *result, d *dist) failure {
 	}
 	var bad []testFile
 	for _, t := range res.Tests {
-		if t.Failed > 0 || t.Exit != 0 || t.Problems {
+		if t.failed() {
 			bad = append(bad, t)
 		}
 	}
@@ -316,6 +323,12 @@ func failureRecord(dir string, res *result, d *dist) failure {
 	}
 	rec.Signature = signatureOf(ev, rec.Stuck)
 	return rec
+}
+
+// failed reports whether the harness counted the test file as failing: a
+// failed test, a non-zero exit or another problem it reported.
+func (t testFile) failed() bool {
+	return t.Failed > 0 || t.Exit != 0 || t.Problems
 }
 
 // failingPhase returns the phase where a distribution failed: the first that
