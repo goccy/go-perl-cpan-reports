@@ -140,8 +140,10 @@ const forkChildNativeCodeMessage = "native modules cannot be used in a forked ch
 
 var (
 	// crashPattern: the messages of a crash, of native code or of the
-	// interpreter.
-	crashPattern           = regexp.MustCompile(`SIGSEGV|Segmentation|panic:|Assertion|runtime error|SIGBUS|SIGABRT`)
+	// interpreter. A failed assertion reads "Assertion `expr' failed." from
+	// C's assert and "Assertion expr failed: file ..." from perl's; the word
+	// alone is in test output that is no crash ("Assertion Count: 0").
+	crashPattern           = regexp.MustCompile(`SIGSEGV|Segmentation|panic:|Assertion .+ failed|runtime error|SIGBUS|SIGABRT`)
 	externalLibraryPattern = regexp.MustCompile(`cannot find -l|` +
 		`pkg-config.*not found|Package '?[\w.+-]+'? was not found|` +
 		`NA: Unable to build|library not found|Could not find .*lib|Alien::|[Yy]ou need to install|` +

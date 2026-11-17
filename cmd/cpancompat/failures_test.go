@@ -27,6 +27,10 @@ func TestCauseOf(t *testing.T) {
 		{[]string{"Can't locate Foo/Bar.pm in @INC (you may need to install the Foo::Bar module)"}, outcomeFail, causeModuleNotFound},
 		{[]string{"Can't locate strict.pm:   /home/cpan/.cache/x/strict.pm: Permission denied at t/a.t line 3."}, outcomeFail, causeINCUnreadable},
 		{[]string{"panic: something at t/a.t line 4."}, outcomeFail, causeCrash},
+		{[]string{"perl: Foo.xs:12: foo: Assertion `p != NULL' failed."}, outcomeFail, causeCrash},
+		{[]string{`Assertion ((svtype)((sv)->sv_flags & 0xff)) >= SVt_PV failed: file "Foo.xs", line 3 at t/a.t line 4.`}, outcomeFail, causeCrash},
+		// A count of assertions that a harness prints is no crash.
+		{[]string{"Assertion Count: 0", "not ok 2 - Passed tests"}, outcomeFail, causeNotAnalysed},
 		{[]string{"Temporary failure in name resolution"}, outcomeFail, causeNetwork},
 		// go-perl's message when a forked child was to run native code, for
 		// an XSUB, a library to load and a hook.
