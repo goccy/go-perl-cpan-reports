@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -26,6 +28,23 @@ func TestCauseOf(t *testing.T) {
 		{[]string{"Can't locate strict.pm:   /home/cpan/.cache/x/strict.pm: Permission denied at t/a.t line 3."}, outcomeFail, causeINCUnreadable},
 		{[]string{"panic: something at t/a.t line 4."}, outcomeFail, causeCrash},
 		{[]string{"Temporary failure in name resolution"}, outcomeFail, causeNetwork},
+		// go-perl's message when a forked child was to run native code, for
+		// an XSUB, a library to load and a hook.
+		{[]string{"Foo::bar: native modules cannot be used in a forked child (/opt/lib/auto/Foo/Foo.so) at t/fork.t line 9."},
+			outcomeFail, causeForkChildNativeCode},
+		{[]string{"Can't load '/opt/lib/auto/IO/Tty/Tty.so' for module IO::Tty: /opt/lib/auto/IO/Tty/Tty.so: native modules cannot be used in a forked child at /usr/lib/DynaLoader.pm line 206."},
+			outcomeFail, causeForkChildNativeCode},
+		{[]string{"the op checker of a native module: native modules cannot be used in a forked child at /opt/lib/Hash/Util.pm line 13."},
+			outcomeFail, causeForkChildNativeCode},
+		// The module it names does not make it TLS.
+		{[]string{"Net::SSLeay::CTX_new: native modules cannot be used in a forked child (/opt/lib/auto/Net/SSLeay/SSLeay.so) at t/a.t line 3."},
+			outcomeFail, causeForkChildNativeCode},
+		// Where the evidence also shows a crash, it does not apply, wherever
+		// the crash is, and a cause after it in the order does.
+		{[]string{"SIGSEGV: segmentation violation", "Foo::bar: native modules cannot be used in a forked child at t/fork.t line 9."},
+			outcomeFail, causeCrash},
+		{[]string{"Net::SSLeay::CTX_new: native modules cannot be used in a forked child at t/a.t line 3.", "panic: x"},
+			outcomeFail, causeTLSOrPTY},
 		// The first cause that matches wins.
 		{[]string{"panic: x", "Can't locate Foo.pm in @INC"}, outcomeFail, causeModuleNotFound},
 		{nil, outcomeOutputLimit, causeOutputLimit},
@@ -133,6 +152,98 @@ func TestFailureRecordOfFailingTests(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rec, want) {
 		t.Errorf("record:\n got %+v\nwant %+v", rec, want)
+	}
+}
+
+// TestFailureRecordOfForkChildNativeCode: go-perl's message from a forked
+// child is evidence even where it does not end like perl's die messages
+// (here a test that printed the error it caught), and it gives the cause.
+func TestFailureRecordOfForkChildNativeCode(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"test.log": strings.Join([]string{
+		"t/00-load.t .. ok",
+		"child failed: Foo::bar: native modules cannot be used in a forked child (/opt/lib/auto/Foo/Foo.so)",
+		"# Looks like your test exited with 255 just after 1.",
+		"t/fork.t ..... ",
+		"Dubious, test returned 255 (wstat 65280, 0xff00)",
+	}, "\n")})
+	res := &result{
+		Dist: "Foo", Release: "Foo-1.0", Outcome: outcomeFail,
+		Phases: []phaseRecord{{Phase: "configure"}, {Phase: "build"}, {Phase: "test", Status: 2}},
+		Tests: []testFile{
+			{File: "t/00-load.t", Planned: 1, Run: 1, Passed: 1},
+			{File: "t/fork.t", Planned: 2, Run: 1, Passed: 1, Exit: 255, Wait: 65280},
+		},
+	}
+	rec := failureRecord(dir, res, nil)
+	if rec.Cause != causeForkChildNativeCode || len(rec.Evidence) == 0 ||
+		!strings.Contains(rec.Evidence[0], forkChildNativeCodeMessage) {
+		t.Errorf("cause %s, evidence %q", rec.Cause, rec.Evidence)
+	}
+}
+
+// TestFailureRecordReadsEveryLineOfFailingFiles: the cause is read from every
+// evidence line the harness printed for the failing files, not only from the
+// 8 the record shows, and the line that tells it is shown too.
+func TestFailureRecordReadsEveryLineOfFailingFiles(t *testing.T) {
+	lines := []string{"t/00-load.t .. ok"}
+	// Lines that differ in more than numbers, which like failures share.
+	for i := range 10 {
+		lines = append(lines, fmt.Sprintf("#   Failed test 'request %c'", 'a'+i))
+	}
+	refusal := "Guard::guard: native modules cannot be used in a forked child (/opt/lib/auto/Guard/Guard.so) at /opt/lib/AnyEvent/Socket.pm line 9."
+	lines = append(lines, refusal, "t/server.t .... ", "Dubious, test returned 10 (wstat 2560, 0xa00)")
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"test.log": strings.Join(lines, "\n")})
+	res := &result{
+		Dist: "Foo", Release: "Foo-1.0", Outcome: outcomeFail,
+		Phases: []phaseRecord{{Phase: "test", Status: 2}},
+		Tests: []testFile{
+			{File: "t/00-load.t", Planned: 1, Run: 1, Passed: 1},
+			{File: "t/server.t", Planned: 10, Run: 10, Failed: 10, Exit: 10, Wait: 2560},
+		},
+	}
+	rec := failureRecord(dir, res, nil)
+	if rec.Cause != causeForkChildNativeCode {
+		t.Errorf("cause %s, want %s", rec.Cause, causeForkChildNativeCode)
+	}
+	if len(rec.Evidence) != 9 || rec.Evidence[8] != refusal {
+		t.Errorf("evidence %q: want the first 8 lines and the refusal", rec.Evidence)
+	}
+}
+
+// TestFailureRecordOfForkChildTimeOut: a phase that ran out of time where the
+// test file running at the limit printed go-perl's message takes the cause
+// of the limitation (its child died and it waited), keeping what the
+// processes did; a message from a file that had ended does not.
+func TestFailureRecordOfForkChildTimeOut(t *testing.T) {
+	stuckLines := strings.Join([]string{
+		`{"pid":10,"ppid":1,"state":"S","elapsed_seconds":300,"cpu_percent":0,"wchan":"do_wait","args":["/usr/bin/timeout","--kill-after=10","300","make","test"],"fds":{},"thread_wchans":{}}`,
+		`{"pid":11,"ppid":10,"state":"S","elapsed_seconds":299,"cpu_percent":0,"wchan":"do_wait","args":["make","test"],"fds":{},"thread_wchans":{}}`,
+		`{"pid":13,"ppid":11,"state":"S","elapsed_seconds":200,"cpu_percent":0,"wchan":"do_wait","args":["/opt/gperl/bin/gperl","run","t/server.t"],"fds":{},"thread_wchans":{}}`,
+	}, "\n")
+	refusal := "HTTP::Parser::XS::parse_http_request: native modules cannot be used in a forked child (/opt/lib/auto/HTTP/Parser/XS/XS.so) at /opt/lib/HTTP/Server/PSGI.pm line 4."
+	for _, tc := range []struct {
+		name  string
+		log   string
+		cause cause
+	}{
+		{"running file", "t/00-load.t .. ok\nt/server.t .. \n" + refusal + "\n", causeForkChildNativeCode},
+		{"ended file", "t/00-load.t .. \n" + refusal + "\nt/00-load.t .. ok\nt/server.t .. \n", causeTimeLimitBlocked},
+		{"with a crash", "t/server.t .. \n" + refusal + "\nSIGSEGV: segmentation violation\n", causeTimeLimitBlocked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, map[string]string{"test.log": tc.log, "test.stuck.jsonl": stuckLines})
+			res := &result{Dist: "Foo", Outcome: outcomeTimeout, Phases: []phaseRecord{{Phase: "build"}, {Phase: "test", Status: 124, TimedOut: true}}}
+			rec := failureRecord(dir, res, nil)
+			if rec.Cause != tc.cause || rec.Stuck == nil || rec.Stuck.Kind != "blocked" {
+				t.Errorf("cause %s, stuck %+v; want %s and the processes", rec.Cause, rec.Stuck, tc.cause)
+			}
+			if tc.cause == causeForkChildNativeCode && !slices.Contains(rec.Evidence, refusal) {
+				t.Errorf("evidence %q lacks the message", rec.Evidence)
+			}
+		})
 	}
 }
 

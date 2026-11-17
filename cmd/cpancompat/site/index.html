@@ -134,17 +134,20 @@ limitation</a>{{end}} (<a href="methodology.html#causes">how causes are decided<
 <h3>{{causeTitle .Cause}}</h3>
 <p>go-perl does not start a new process for <code>fork</code>. Like perl on Windows, it makes a pseudo-process:
 the interpreter's memory is copied, and the child runs on a goroutine of the same operating system process.
-Memory that native (XS) modules allocate in C is not part of the interpreter's memory, so it is not copied, and
-parent and child share it: the C structures behind DBI handles, SSL contexts, libev event loops, the modules' own
-objects. When the child frees or changes that state, the parent later uses or frees it again, which ends in double
-frees, use after free or wrong answers. This cannot be fixed within one process: one virtual address can only refer
-to one memory at a time. perl itself, whose <code>fork</code> makes a real process, is not affected, and neither is
-pure-Perl code.</p>
-<p>The logs cannot tell these failures apart reliably: a crash in the parent after a child ended looks like any
-other crash. So they are attributed by analysis, recorded in the repository
-(<code>cmd/cpancompat/known-causes.json</code>): for each distribution, the test files the analysis tied to this
-limitation and the evidence. A distribution takes this cause only when every test file that failed in the run is one
-of them; otherwise the cause its log tells stands.</p>
+Memory that native (XS) modules allocate in C is not part of the interpreter's memory, so it is not copied: the C
+structures behind DBI handles, SSL contexts, libev event loops, the modules' own objects. A child using them would
+share them with its parent. So native code is not available in a forked child: calling an XSUB, loading a native
+module or running a hook one installed (an op checker, a keyword plugin, magic) dies with a Perl error, which a
+program can catch, such as</p>
+<pre>Foo::bar: native modules cannot be used in a forked child (.../auto/Foo/Foo.so) at script.pl line 12.</pre>
+<p>Native code is not run for objects destroyed in the child either, and the parent is not affected. Pure-Perl code
+works in a forked child, and perl itself, whose <code>fork</code> makes a real process, has no such limitation.</p>
+<p>A failure takes this cause when go-perl's message is among its evidence lines and no crash is, and a phase
+that ran out of time when the test file running at the limit printed it. A child whose output was discarded leaves
+no message in the log: those failures are attributed by analysis, recorded in the
+repository (<code>cmd/cpancompat/known-causes.json</code>): for each distribution, the test files the analysis tied
+to this limitation and the evidence. A distribution takes the cause from that file only when every test file that
+failed in the run is one of them; otherwise the cause its log tells stands.</p>
 <p>In run <code>{{$sub.Name}}</code>, {{num (len .Dists)}} distribution{{if ne (len .Dists) 1}}s{{end}} failed for
 this reason, {{num .InReference}} of them in the reference set{{if .Dists}}:{{else}}.{{end}}</p>
 {{- if .Dists}}

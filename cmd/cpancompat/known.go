@@ -1,9 +1,9 @@
 package main
 
-// Known causes: the causes of failures that the logs cannot tell reliably,
-// given by analysis and recorded as data in known-causes.json, which is
-// built into the command. Each entry names a distribution, the cause, the
-// test files the analysis attributed to it and the evidence for that.
+// Known causes: the causes of failures whose logs do not tell them, given by
+// analysis and recorded as data in known-causes.json, which is built into
+// the command. Each entry names a distribution, the cause, the test files
+// the analysis attributed to it and the evidence for that.
 //
 // The entries are about go-perl: they are applied to go-perl runs only, and
 // only to a distribution whose tests failed (outcome fail) in no test file
@@ -35,9 +35,10 @@ type knownCause struct {
 	Evidence string `json:"evidence"`
 }
 
-// knownCauseKinds are the causes an entry may name: the ones the logs
-// cannot tell, which only analysis gives.
-var knownCauseKinds = []cause{causeForkSharesNativeMemory}
+// knownCauseKinds are the causes an entry may name: the known limitation of
+// fork, whose message the evidence shows only where the child's output
+// reached the log; a child whose output was discarded leaves none.
+var knownCauseKinds = []cause{causeForkChildNativeCode}
 
 // parseKnownCauses reads the entries of a known-causes file, by
 // distribution. Every entry must name a distribution no other entry names,

@@ -79,34 +79,42 @@ home directory short.
 ### Known causes
 
 `report` reads the cause of each failure from the log of its failing phase, by the
-patterns of the messages in it. One class of failures cannot be told that way: a known
-limitation of go-perl. gperl runs a `fork` child as a pseudo-process, the way perl does
-on Windows: the interpreter's memory is copied and the child runs on a goroutine of the
-same OS process, but the memory native (XS) modules allocate in C is not copied, so parent
-and child share it (DBI handles' C structs, SSL contexts, libev loops, the modules' own
-objects). When the child frees or changes that state, the parent uses or frees it again:
-double frees, use after free, wrong answers. One virtual address can only refer to one
-memory at a time, so this cannot be fixed within one process; perl itself, with a real
-fork, and pure-Perl code are not affected. A fault on a fork child might be told apart
-in a log, but a fault in the parent after a child ended cannot. So these failures are
-attributed by analysis and recorded as data in `cmd/cpancompat/known-causes.json`, a
-JSON array with one entry per distribution:
+patterns of the messages in it. One cause is a known limitation of go-perl. gperl runs a
+`fork` child as a pseudo-process, the way perl does on Windows: the interpreter's memory
+is copied and the child runs on a goroutine of the same OS process. The memory native
+(XS) modules allocate in C is not part of the interpreter's memory and is not copied (DBI
+handles' C structs, SSL contexts, libev loops, the modules' own objects), so native code
+is not available in a forked child: calling an XSUB, loading a native module or running
+a hook one installed dies with a Perl error such as
+
+```
+Foo::bar: native modules cannot be used in a forked child (.../auto/Foo/Foo.so) at script.pl line 12.
+```
+
+perl itself, with a real fork, and pure-Perl code are not affected. A failure whose
+evidence lines carry that message, and no crash, takes the cause
+`fork-child-native-code`, and so does a phase that ran out of time where the test file
+running at the limit printed it (its child died and it waited for the child). A child whose output was discarded (a daemon that closes its
+standard error, a server child whose messages go nowhere) leaves no message in the log,
+and the failure shows only as a parent that waited in vain or a test that saw a closed
+connection. Those failures are attributed by analysis and recorded as data in
+`cmd/cpancompat/known-causes.json`, a JSON array with one entry per distribution:
 
 ```json
 {
-  "dist": "XS-Logger",
-  "cause": "fork-shares-native-memory",
-  "tests": ["t/fork.t"],
-  "evidence": "Its C logger object is shared with the child: the child logs and exits, and the parent's next log call faults (segmentation fault in the parent after the child ended)."
+  "dist": "Some-Server",
+  "cause": "fork-child-native-code",
+  "tests": ["t/server.t"],
+  "evidence": "The server child loads JSON::XS after fork with its standard error closed; run with it open, it dies with go-perl's message, and the client sees the connection closed."
 }
 ```
 
 | field | what it holds |
 |---|---|
 | `dist` | the distribution's name; one entry per distribution |
-| `cause` | the cause id: only causes no log pattern gives are accepted, at present `fork-shares-native-memory` |
+| `cause` | the cause id: at present only `fork-child-native-code` is accepted |
 | `tests` | the test files the analysis attributed to the cause |
-| `evidence` | what ties them to it, in a sentence or two: for this cause, which native object is shared, and whether the fault is on the fork child or in the parent after the child ended |
+| `evidence` | what ties them to it, in a sentence or two: which native module the child uses, and how the analysis saw the message the log lacks |
 
 The file is built into `cpancompat`. `report -interpreter-name go-perl`, `export
 -interpreter-name go-perl` and `site` (for a run exported as go-perl) give a
@@ -120,16 +128,14 @@ narrowed or removed, export the run again.
 
 Justify every entry from the survey's records and logs, or from a reproduction:
 
-- List a test file only when the evidence ties it to the cause: a fault on a fork child
-  (in the Go traceback of the log, the faulting goroutine is not goroutine 1, the main
-  one, and runs native code), or a fault or wrong answer in the parent after the child
-  ended (the log or the test shows the child had ended, for example the assertion after
-  `waitpid`), on an object both share.
+- List a test file only when go-perl's message is shown to be what failed it: run the
+  test in the survey image with the child's output kept (for example with the server's
+  log or standard error sent to a file) and find the message there.
 - Leave out the test files that fail for another reason, even in the same distribution,
   and the distributions of which no test file can be tied.
-- Write the evidence in the entry: the native object shared, and where the fault is.
-  Keep it free of paths of your machine and of anything that only means something in
-  your own notes.
+- Write the evidence in the entry: the native module the child uses and how the message
+  was seen. Keep it free of paths of your machine and of anything that only means
+  something in your own notes.
 
 ## Viewing the site locally
 

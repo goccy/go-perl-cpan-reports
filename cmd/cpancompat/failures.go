@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -24,12 +25,16 @@ const (
 	// causeBlocked: a distribution providing a module it lacked did not
 	// install (the outcome blocked).
 	causeBlocked cause = "blocked"
-	// causeForkSharesNativeMemory: a known limitation of go-perl, which
-	// runs a fork child as a pseudo-process in the same OS process, so
-	// parent and child share the memory native modules allocate. The logs
-	// cannot tell it reliably: it is given by analysis, recorded in
+	// causeForkChildNativeCode: a known limitation of go-perl, which runs
+	// a fork child as a pseudo-process in the same OS process. The memory
+	// native modules allocate is not part of the interpreter's memory that
+	// the child gets a copy of, so the child cannot use native code: a
+	// call into a native module, loading one, or a hook one installed dies
+	// with go-perl's message (forkChildNativeCodeMessage). The evidence
+	// tells it where the child's message reached the log; where the child's
+	// output was discarded, analysis gives it, recorded in
 	// known-causes.json (known.go).
-	causeForkSharesNativeMemory cause = "fork-shares-native-memory"
+	causeForkChildNativeCode cause = "fork-child-native-code"
 	// The causes the evidence lines tell, in the order they are tried.
 	causeExternalLibrary cause = "external-library"
 	causeOtherOS         cause = "other-os"
@@ -60,33 +65,33 @@ const (
 
 // causes lists every cause, in the order they are presented.
 var causes = []cause{
-	causeBlocked, causeForkSharesNativeMemory, causeExternalLibrary, causeOtherOS, causePerlHeader, causeCAPI,
-	causeThreads, causeTLSOrPTY, causeModuleNotFound, causeINCUnreadable, causeCrash,
+	causeBlocked, causeExternalLibrary, causeOtherOS, causePerlHeader, causeCAPI,
+	causeThreads, causeForkChildNativeCode, causeTLSOrPTY, causeModuleNotFound, causeINCUnreadable, causeCrash,
 	causeNetwork, causeOutputLimit, causeTimeLimitBlocked, causeTimeLimitSpinning,
 	causeTimeLimitSlow, causeTimeLimit, causeDeclined, causeNotAnalysed,
 }
 
 // causeTitles describes each cause in a few words.
 var causeTitles = map[cause]string{
-	causeBlocked:                "blocked by a distribution that did not install",
-	causeForkSharesNativeMemory: "fork: a pseudo-process child shares native memory with its parent (known limitation)",
-	causeExternalLibrary:        "an external C library, header or tool is missing",
-	causeOtherOS:                "made for another operating system",
-	causePerlHeader:             "a perl header is missing",
-	causeCAPI:                   "C compile or link errors against the perl API",
-	causeThreads:                "needs a perl with threads",
-	causeTLSOrPTY:               "TLS or a pseudo-terminal",
-	causeModuleNotFound:         "a module not found at run time",
-	causeINCUnreadable:          "@INC unreadable after dropping privileges",
-	causeCrash:                  "a crash of native code or of the interpreter",
-	causeNetwork:                "network access",
-	causeOutputLimit:            "output limit: a phase wrote more than 256 MiB",
-	causeTimeLimitBlocked:       "time limit: blocked (waiting, no CPU)",
-	causeTimeLimitSpinning:      "time limit: spinning (one program on the CPU for minutes)",
-	causeTimeLimitSlow:          "time limit: slow (still going through its test files)",
-	causeTimeLimit:              "time limit (not analysed)",
-	causeDeclined:               "declined by its own configure script (not analysed)",
-	causeNotAnalysed:            "not analysed",
+	causeBlocked:             "blocked by a distribution that did not install",
+	causeForkChildNativeCode: "fork: native modules cannot be used in a forked child (known limitation)",
+	causeExternalLibrary:     "an external C library, header or tool is missing",
+	causeOtherOS:             "made for another operating system",
+	causePerlHeader:          "a perl header is missing",
+	causeCAPI:                "C compile or link errors against the perl API",
+	causeThreads:             "needs a perl with threads",
+	causeTLSOrPTY:            "TLS or a pseudo-terminal",
+	causeModuleNotFound:      "a module not found at run time",
+	causeINCUnreadable:       "@INC unreadable after dropping privileges",
+	causeCrash:               "a crash of native code or of the interpreter",
+	causeNetwork:             "network access",
+	causeOutputLimit:         "output limit: a phase wrote more than 256 MiB",
+	causeTimeLimitBlocked:    "time limit: blocked (waiting, no CPU)",
+	causeTimeLimitSpinning:   "time limit: spinning (one program on the CPU for minutes)",
+	causeTimeLimitSlow:       "time limit: slow (still going through its test files)",
+	causeTimeLimit:           "time limit (not analysed)",
+	causeDeclined:            "declined by its own configure script (not analysed)",
+	causeNotAnalysed:         "not analysed",
 }
 
 // The causes the evidence lines tell, each by the patterns of the
@@ -109,14 +114,34 @@ var evidenceCauses = []struct {
 		`too (few|many) arguments to function|conflicting types|incomplete type|not an lvalue|` +
 		`request for member|invalid use of|expected .* before`).MatchString},
 	{causeThreads, regexp.MustCompile(`not built to support threads|requires? (i)?threads|This Perl not built to support threads`).MatchString},
+	// go-perl's own message, though this program reads it like the others:
+	// go-perl defines it, but it reaches this program only as a line of a
+	// test's output, through the distribution's tests and the harness,
+	// which carry nothing but text. It comes before causeTLSOrPTY, whose
+	// pattern matches the names of the native modules (Net::SSLeay,
+	// IO::Tty) the message names. Where the evidence also shows a crash,
+	// it does not apply and a cause below does: a crash is a defect to
+	// look into even where a child also used native code.
+	{causeForkChildNativeCode, toldForkChildNativeCode},
 	{causeTLSOrPTY, regexp.MustCompile(`SSL (accept|connect) attempt failed|SSL_|IO::Socket::SSL|Net::SSLeay|IO::Pty|IO::Tty|\bpty\b|openpty`).MatchString},
 	{causeModuleNotFound, regexp.MustCompile(`Can't locate \S+\.pm in @INC`).MatchString},
 	{causeINCUnreadable, regexp.MustCompile(`Can't locate .*Permission denied`).MatchString},
-	{causeCrash, regexp.MustCompile(`SIGSEGV|Segmentation|panic:|Assertion|runtime error|SIGBUS|SIGABRT`).MatchString},
+	{causeCrash, crashPattern.MatchString},
 	{causeNetwork, regexp.MustCompile(`Temporary failure in name resolution|Could not resolve|Network is unreachable|Connection timed out`).MatchString},
 }
 
+// forkChildNativeCodeMessage is in every message go-perl dies with when a
+// forked child was to run native code, whatever it was to run: an XSUB
+// ("Pkg::name: native modules cannot be used in a forked child (lib.so) at
+// ... line N."), a library to load ("Can't load 'lib.so' for module Pkg:
+// lib.so: native modules cannot be used ..."), a hook ("the op checker of a
+// native module: native modules cannot be used ...").
+const forkChildNativeCodeMessage = "native modules cannot be used in a forked child"
+
 var (
+	// crashPattern: the messages of a crash, of native code or of the
+	// interpreter.
+	crashPattern           = regexp.MustCompile(`SIGSEGV|Segmentation|panic:|Assertion|runtime error|SIGBUS|SIGABRT`)
 	externalLibraryPattern = regexp.MustCompile(`cannot find -l|` +
 		`pkg-config.*not found|Package '?[\w.+-]+'? was not found|` +
 		`NA: Unable to build|library not found|Could not find .*lib|Alien::|[Yy]ou need to install|` +
@@ -128,6 +153,12 @@ var (
 	// causePerlHeader, not a missing external library.
 	perlHeaderPrefixes = []string{"EXTERN", "perl", "XSUB", "ppport", "embed", "proto", "regcomp", "perlio", "patchlevel"}
 )
+
+// toldForkChildNativeCode reports whether text has go-perl's message for a
+// forked child that was to run native code, and no crash.
+func toldForkChildNativeCode(text string) bool {
+	return strings.Contains(text, forkChildNativeCodeMessage) && !crashPattern.MatchString(text)
+}
 
 // missingNonPerlHeader reports whether text has the C compiler's message
 // for a missing header whose name does not start like a perl header's.
@@ -145,6 +176,22 @@ func missingNonPerlHeader(text string) bool {
 		}
 	}
 	return false
+}
+
+// causeLine returns the first of the evidence lines that tells c by itself;
+// "" when none does, or c is not a cause evidence lines tell.
+func causeLine(evidence []string, c cause) string {
+	for _, ec := range evidenceCauses {
+		if ec.cause != c {
+			continue
+		}
+		for _, line := range evidence {
+			if ec.matches(line) {
+				return line
+			}
+		}
+	}
+	return ""
 }
 
 // causeOf is the cause the evidence lines of a distribution that did not
@@ -288,30 +335,47 @@ func failureRecord(dir string, res *result, d *dist) failure {
 			bad = append(bad, t)
 		}
 	}
-	var ev []string
+	// lines are the evidence lines the cause is read from, ev the ones the
+	// record shows: for failing test files, every evidence line the harness
+	// printed for them, of which the first 8 are shown.
+	var lines, ev []string
 	if len(bad) > 0 {
 		rec.TestFiles = len(res.Tests)
 		rec.FailingTests = bad[:min(40, len(bad))]
-		ev = testEvidence(log, bad, 8)
-	} else {
-		ev = evidenceOf(log, 8)
+		lines = failingFilesEvidence(log, bad)
+		n := min(8, len(lines))
+		ev = lines[:n:n]
 	}
-	if len(ev) == 0 || res.Outcome == outcomeDeclined {
-		ev = append(ev, logTail(log, 5)...)
-		ev = ev[:min(10, len(ev))]
+	if len(lines) == 0 {
+		ev = evidenceOf(log, 8)
+		if len(ev) == 0 || res.Outcome == outcomeDeclined {
+			ev = append(ev, logTail(log, 5)...)
+			ev = ev[:min(10, len(ev))]
+		}
+		lines = ev
+	}
+	rec.Cause = causeOf(lines, res.Outcome)
+	ev = withLine(ev, causeLine(lines, rec.Cause))
+	if rec.TimedOut {
+		s := stuckOf(filepath.Join(dir, rec.Phase+".stuck.jsonl"))
+		rec.Stuck = s
+		// A forked child that died of the limitation leaves its parent
+		// waiting for it: the test file running at the limit printed
+		// go-perl's message.
+		running := runningFileEvidence(log)
+		switch {
+		case toldForkChildNativeCode(strings.Join(running, "\n")):
+			rec.Cause = causeForkChildNativeCode
+			ev = withLine(ev, causeLine(running, rec.Cause))
+		case s != nil:
+			rec.Cause = stuckCauses[s.Kind]
+		}
 	}
 	rec.Evidence = ev
 	if rec.Phase == "configure" || rec.Phase == "build" {
 		rec.Symbols = symbolsOf(log)
 	} else {
 		rec.Symbols = symbolsOf(strings.Join(ev, "\n"))
-	}
-	rec.Cause = causeOf(ev, res.Outcome)
-	if rec.TimedOut {
-		if s := stuckOf(filepath.Join(dir, rec.Phase+".stuck.jsonl")); s != nil {
-			rec.Stuck = s
-			rec.Cause = stuckCauses[s.Kind]
-		}
 	}
 	if rec.Cause == causeNotAnalysed && res.Outcome == outcomeDeclined {
 		rec.Cause = causeDeclined
@@ -407,7 +471,8 @@ var (
 		`^not ok|^#\s+Failed test|^#\s+(got|expected)|Dubious|` +
 		` at \S+ line \d+\.?$|Bail out|timed out|Killed|` +
 		`OS unsupported|NA: Unable to build|` +
-		`Compilation failed|syntax error|Out of memory|runtime error)`)
+		`Compilation failed|syntax error|Out of memory|runtime error|` +
+		regexp.QuoteMeta(forkChildNativeCodeMessage) + `)`)
 	// genericPattern: summary lines every failure prints.
 	genericPattern = regexp.MustCompile(`^Dubious, test returned|^Failed tests?:|^make(\[\d+\])?: \*\*\*|^Possible precedence`)
 	// testResultLine: the line the harness prints for a test file.
@@ -445,11 +510,36 @@ func evidenceOf(text string, n int) []string {
 	return out
 }
 
-// testEvidence returns the evidence lines of the failing test files, where
-// the harness printed their output one after another: the lines before
-// each failing file's own result line. Without any, the evidence of the
+// withLine returns ev with line added at its end, unless line is "" or ev
+// has it already.
+func withLine(ev []string, line string) []string {
+	if line == "" || slices.Contains(ev, line) {
+		return ev
+	}
+	return append(ev, line)
+}
+
+// runningFileEvidence returns the evidence lines of text after the
+// harness's last test result line: in a test phase that ran out of time,
+// the output of the test file that was running at the limit (and of what
+// earlier files left running). Without a result line, the evidence of the
 // whole text.
-func testEvidence(text string, files []testFile, n int) []string {
+func runningFileEvidence(text string) []string {
+	lines := splitLines(text)
+	start := 0
+	for i, line := range lines {
+		if testResultLine.MatchString(line) {
+			start = i + 1
+		}
+	}
+	return evidenceOf(strings.Join(lines[start:], "\n"), len(lines))
+}
+
+// failingFilesEvidence returns every evidence line of the failing test
+// files, where the harness printed their output one after another: the
+// lines before each failing file's own result line. nil when none of them
+// has a result line in text or their lines have no evidence.
+func failingFilesEvidence(text string, files []testFile) []string {
 	lines := splitLines(text)
 	var out []string
 	seen := map[string]bool{}
@@ -478,14 +568,8 @@ func testEvidence(text string, files []testFile, n int) []string {
 				out = append(out, line)
 			}
 		}
-		if len(out) >= n {
-			break
-		}
 	}
-	if len(out) == 0 {
-		return evidenceOf(text, n)
-	}
-	return out[:min(n, len(out))]
+	return out
 }
 
 // logTail returns the last n non-blank lines of text, trimmed.

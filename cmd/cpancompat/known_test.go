@@ -25,13 +25,13 @@ func TestKnownCausesFile(t *testing.T) {
 func TestParseKnownCausesRefuses(t *testing.T) {
 	for name, raw := range map[string]string{
 		"a cause the logs tell": `[{"dist":"A","cause":"crash","tests":["t/a.t"],"evidence":"e"}]`,
-		"no test files":         `[{"dist":"A","cause":"fork-shares-native-memory","tests":[],"evidence":"e"}]`,
-		"no evidence":           `[{"dist":"A","cause":"fork-shares-native-memory","tests":["t/a.t"]}]`,
-		"no distribution":       `[{"cause":"fork-shares-native-memory","tests":["t/a.t"],"evidence":"e"}]`,
-		"a file listed twice":   `[{"dist":"A","cause":"fork-shares-native-memory","tests":["t/a.t","t/a.t"],"evidence":"e"}]`,
-		"an unknown field":      `[{"dist":"A","cause":"fork-shares-native-memory","tests":["t/a.t"],"evidence":"e","file":"t/a.t"}]`,
-		"two entries of one distribution": `[{"dist":"A","cause":"fork-shares-native-memory","tests":["t/a.t"],"evidence":"e"},
-			{"dist":"A","cause":"fork-shares-native-memory","tests":["t/b.t"],"evidence":"e"}]`,
+		"no test files":         `[{"dist":"A","cause":"fork-child-native-code","tests":[],"evidence":"e"}]`,
+		"no evidence":           `[{"dist":"A","cause":"fork-child-native-code","tests":["t/a.t"]}]`,
+		"no distribution":       `[{"cause":"fork-child-native-code","tests":["t/a.t"],"evidence":"e"}]`,
+		"a file listed twice":   `[{"dist":"A","cause":"fork-child-native-code","tests":["t/a.t","t/a.t"],"evidence":"e"}]`,
+		"an unknown field":      `[{"dist":"A","cause":"fork-child-native-code","tests":["t/a.t"],"evidence":"e","file":"t/a.t"}]`,
+		"two entries of one distribution": `[{"dist":"A","cause":"fork-child-native-code","tests":["t/a.t"],"evidence":"e"},
+			{"dist":"A","cause":"fork-child-native-code","tests":["t/b.t"],"evidence":"e"}]`,
 	} {
 		if _, err := parseKnownCauses([]byte(raw)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -46,11 +46,11 @@ func failingTest(file string) testFile {
 
 func TestApplyKnownCauses(t *testing.T) {
 	known, err := parseKnownCauses([]byte(`[
-		{"dist":"Covered","cause":"fork-shares-native-memory","tests":["t/fork.t","t/server.t","t/other-run.t"],"evidence":"e"},
-		{"dist":"AlsoOther","cause":"fork-shares-native-memory","tests":["t/fork.t"],"evidence":"e"},
-		{"dist":"Blocked","cause":"fork-shares-native-memory","tests":["t/fork.t"],"evidence":"e"},
-		{"dist":"TimedOut","cause":"fork-shares-native-memory","tests":["t/fork.t"],"evidence":"e"},
-		{"dist":"NoFailingFile","cause":"fork-shares-native-memory","tests":["t/fork.t"],"evidence":"e"}
+		{"dist":"Covered","cause":"fork-child-native-code","tests":["t/fork.t","t/server.t","t/other-run.t"],"evidence":"e"},
+		{"dist":"AlsoOther","cause":"fork-child-native-code","tests":["t/fork.t"],"evidence":"e"},
+		{"dist":"Blocked","cause":"fork-child-native-code","tests":["t/fork.t"],"evidence":"e"},
+		{"dist":"TimedOut","cause":"fork-child-native-code","tests":["t/fork.t"],"evidence":"e"},
+		{"dist":"NoFailingFile","cause":"fork-child-native-code","tests":["t/fork.t"],"evidence":"e"}
 	]`))
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestApplyKnownCauses(t *testing.T) {
 	goPerl := run()
 	goPerl.applyKnownCauses(known, interpreterGoPerl)
 	want := map[string]cause{
-		"Covered": causeForkSharesNativeMemory, "AlsoOther": causeCrash, "Blocked": causeBlocked,
+		"Covered": causeForkChildNativeCode, "AlsoOther": causeCrash, "Blocked": causeBlocked,
 		"TimedOut": causeTimeLimitBlocked, "NoFailingFile": causeNotAnalysed, "Unlisted": causeCrash,
 	}
 	for name, c := range causesOf(goPerl) {
@@ -124,9 +124,9 @@ func withKnownCauses(t *testing.T, raw string) {
 // generates the site.
 func TestKnownCausesThroughExportAndSite(t *testing.T) {
 	withKnownCauses(t, `[
-		{"dist":"Forky","cause":"fork-shares-native-memory","tests":["t/fork.t"],
+		{"dist":"Forky","cause":"fork-child-native-code","tests":["t/fork.t"],
 		 "evidence":"The <handle> is shared with the child: a fault on the fork child."},
-		{"dist":"Mixed","cause":"fork-shares-native-memory","tests":["t/fork.t"],"evidence":"e"}
+		{"dist":"Mixed","cause":"fork-child-native-code","tests":["t/fork.t"],"evidence":"e"}
 	]`)
 	dists := []dist{
 		{Dist: "Forky", Release: "Forky-1", OnPerl: &perlReports{LinuxPass: 1}},
@@ -176,7 +176,7 @@ func TestKnownCausesThroughExportAndSite(t *testing.T) {
 		}
 		return m
 	}
-	if got := exported("sub"); got["Forky"] != causeForkSharesNativeMemory || got["Mixed"] != causeCrash {
+	if got := exported("sub"); got["Forky"] != causeForkChildNativeCode || got["Mixed"] != causeCrash {
 		t.Errorf("go-perl run's exported causes: %v", got)
 	}
 	if got := exported("ref"); got["Forky"] != causeCrash || got["Mixed"] != causeCrash {
@@ -199,7 +199,7 @@ func TestKnownCausesThroughExportAndSite(t *testing.T) {
 	for _, want := range []string{
 		`<section id="known-limitations">`,
 		"<h2>Known limitations</h2>",
-		"one virtual address can only refer\nto one memory at a time",
+		"So native code is not available in a forked child",
 		"In run <code>sub</code>, 1 distribution failed for\nthis reason, 1 of them in the reference set:",
 		// The list of the distributions: Forky alone.
 		"<p><a href=\"d/Forky.html\">Forky</a></p>",
@@ -210,7 +210,7 @@ func TestKnownCausesThroughExportAndSite(t *testing.T) {
 	}
 	forky := read("d/Forky.html")
 	if !strings.Contains(forky, "The &lt;handle&gt; is shared with the child: a fault on the fork child.") ||
-		strings.Count(forky, causeTitles[causeForkSharesNativeMemory]) != 1 {
+		strings.Count(forky, causeTitles[causeForkChildNativeCode]) != 1 {
 		t.Errorf("d/Forky.html: the analysis is not shown once, for the go-perl run alone:\n%s", forky)
 	}
 	if strings.Contains(read("d/Mixed.html"), "known-limitations") {

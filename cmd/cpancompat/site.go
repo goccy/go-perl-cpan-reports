@@ -154,7 +154,7 @@ func buildSiteData(p *published) (*siteData, error) {
 	}
 	s.Causes = causeCounts(p.set, s.Subject.data, refData)
 	if s.Subject.Meta.Interpreter.Name == interpreterGoPerl {
-		l := &knownLimitation{Cause: causeForkSharesNativeMemory}
+		l := &knownLimitation{Cause: causeForkChildNativeCode}
 		for name, f := range s.Subject.data.failures {
 			if f.Cause != l.Cause {
 				continue

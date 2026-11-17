@@ -94,18 +94,23 @@ It was run anyway, and its page shows how that went.</p>
 logs are other programs' output (make, the C compiler, perl, the test harness, the distribution's own scripts), so
 this is done by the patterns of their messages:</p>
 <ol>
-  <li>The <strong>evidence lines</strong> are taken from the log: for failing test files, the lines the harness
-  printed for each of them; otherwise the lines that report an error (compiler and linker errors, <code>Can't
-  locate</code>, <code>panic</code>, failed tests, …); without any, the last lines.</li>
+  <li>The <strong>evidence lines</strong> are the lines of the log that report an error (compiler and linker
+  errors, <code>Can't locate</code>, <code>panic</code>, failed tests, …): for failing test files, all of those the
+  harness printed for each of them, of which a distribution's page shows the first 8 and the one that tells the
+  cause; otherwise the first 8 of the log; without any, the last lines.</li>
   <li>The first cause, in the order of the table, whose messages appear in the evidence is the cause.</li>
   <li>A phase that ran out of time is classified by what its processes were doing 15 seconds before the limit:
   waiting without using the CPU (blocked), one program on the CPU for minutes (spinning), or a program that started
-  recently on the CPU (slow: still going through its test files).</li>
-  <li>A <strong>known limitation</strong> of go-perl that the logs cannot tell reliably is given by analysis
-  instead: the repository records, for each distribution, the test files the analysis tied to it and the evidence
-  (<code>cmd/cpancompat/known-causes.json</code>). In a go-perl run, a distribution whose tests failed takes that
-  cause when every test file that failed is one of those; otherwise the cause its log tells stands. Runs of perl
-  itself never take it.{{if $s.ForkLimitation}} <a href="index.html#known-limitations">The known
+  recently on the CPU (slow: still going through its test files). On go-perl, where the test file running at the
+  limit printed go-perl's message for a forked child that was to run native code, the child died and its parent
+  waited for it: the phase takes the cause of that limitation instead.</li>
+  <li>The <strong>known limitation</strong> of go-perl, that native modules cannot be used in a forked child, is
+  told by go-perl's message, except where the evidence also shows a crash, and for a phase that ran out of
+  time as the item above says. A child whose output was discarded leaves
+  no message, so for those failures it is given by analysis instead: the repository records, for each distribution,
+  the test files the analysis tied to it and the evidence (<code>cmd/cpancompat/known-causes.json</code>). In a
+  go-perl run, a distribution whose tests failed takes that cause when every test file that failed is one of those;
+  otherwise the cause its log tells stands. Runs of perl itself never take it from that file.{{if $s.ForkLimitation}} <a href="index.html#known-limitations">The known
   limitations</a>.{{end}}</li>
   <li>Every distribution gets a cause; when nothing above applies, it is <em>not analysed</em>.</li>
 </ol>
