@@ -6,13 +6,36 @@ set -e
 G=/opt/gperl
 mkdir -p $G/proj $G/fakearchlib $G/local/lib/perl5 $G/local/bin
 
-cat > $G/bin/perl <<'EOF'
-#!/bin/sh
-GPERL_INTERNAL_PERL_CLI=1
-export GPERL_INTERNAL_PERL_CLI
-exec /opt/gperl/bin/gperl run "$@"
+# The perl command is a program, not a shell script: a shell in between would
+# change what the program sees, as sh sets PWD to the working directory when
+# PWD does not name it, where perl leaves the environment as it was given.
+cat > $G/perl.c <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+    char **args = calloc(argc + 2, sizeof *args);
+    if (args == NULL) {
+        perror("perl");
+        return 127;
+    }
+    args[0] = "/opt/gperl/bin/gperl";
+    args[1] = "run";
+    for (int i = 1; i < argc; i++) {
+        args[i + 1] = argv[i];
+    }
+    if (setenv("GPERL_INTERNAL_PERL_CLI", "1", 1) != 0) {
+        perror("perl");
+        return 127;
+    }
+    execv(args[0], args);
+    perror(args[0]);
+    return 127;
+}
 EOF
-chmod +x $G/bin/perl
+cc -O2 -o $G/bin/perl $G/perl.c
+rm $G/perl.c
 
 # The XS SDK (the headers native extensions compile against) is unpacked by
 # any `gperl xs build`; the distribution named here does not exist.
