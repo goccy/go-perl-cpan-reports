@@ -28,6 +28,17 @@ test -f "$stdlib/strict.pm"
 # on Config.pm in the architecture library.
 ln -s "$stdlib/Config.pm" $G/fakearchlib/Config.pm
 
+# perl's programs (prove, perldoc, pod2usage, ...) are beside the path that
+# runs gperl as the perl command, which %Config names as bin and scriptdir
+# (the directory of $^X). Here, before GPERL_PERL_EXE names the shim, that is
+# gperl's own directory for them; after it, the shim's directory has to hold
+# them too.
+scriptdir=$($G/bin/perl -MConfig -e 'print $Config{scriptdir}')
+test -f "$scriptdir/prove"
+for f in "$scriptdir"/*; do
+    [ "${f##*/}" = perl ] || ln -sf "$f" $G/bin/
+done
+
 # The compiler %Config describes is this machine's, in every key that names
 # it, as `gperl xs build` describes it (hostToolchain in gperl/xs.go): build
 # scripts choose flags by the compiler's identity, pass the preprocessor
@@ -54,9 +65,11 @@ glibc=$(printf '#include <features.h>\n__GLIBC__ __GLIBC_MINOR__\n' | cc -E -P -
 sed -e "s|@STDLIB@|$stdlib|g" -e "s|@CCVERSION@|$ccversion|g" \
     -e "s|@LIBPTH@|$libpth|g" -e "s|@LIBC@|$libc|g" -e "s|@GLIBC@|$glibc|g" \
     > $G/config-overlay.pl <<'EOF'
-use Config ();
 my $ccflags = '-fno-strict-aliasing -fstack-protector-strong -DPERL_USE_SAFE_PUTENV -D_GNU_SOURCE -I/opt/gperl/proj/local/xs/.sdk';
-my %over = (
+# Config.pm reports these in place of its own values in every view of
+# %Config (the hash, config_sh, perl -V); they are given before it is loaded,
+# so that a program starts with no module loaded, as on perl.
+%Config::Override = (
     'perlpath' => '/opt/gperl/bin/perl', 'startperl' => '#!/opt/gperl/bin/perl',
     'cc' => 'cc', 'ld' => 'cc', 'ar' => 'ar', 'full_ar' => 'ar',
     'ranlib' => 'ranlib', 'make' => 'make',
@@ -78,10 +91,6 @@ my %over = (
     'vendorlibexp' => '', 'vendorarchexp' => '',
     'installprivlib' => '@STDLIB@', 'installarchlib' => '/opt/gperl/fakearchlib',
 );
-# %Config stays the tied, read-only view it is on every perl; the values go
-# into the Config object, where FETCH looks first.
-my $config = tied %Config::Config;
-$config->{$_} = $over{$_} for keys %over;
 $^O = 'linux';
 1;
 EOF
