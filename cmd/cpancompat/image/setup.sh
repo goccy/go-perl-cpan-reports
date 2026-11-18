@@ -108,14 +108,19 @@ my $ccflags = '-fno-strict-aliasing -fstack-protector-strong -DPERL_USE_SAFE_PUT
     'optimize' => '-O2', 'ldflags' => '', 'cccdlflags' => '-fPIC',
     'ccdlflags' => '', 'obj_ext' => '.o', 'exe_ext' => '', 'lib_ext' => '.a',
     'usedl' => 'define', 'dlsrc' => 'dl_dlopen.xs', 'useshrplib' => 'false',
-    'osname' => 'linux', 'so' => 'so', 'dlext' => 'so', 'lddlflags' => '-shared',
+    'so' => 'so', 'dlext' => 'so', 'lddlflags' => '-shared',
     'privlibexp' => '@STDLIB@', 'privlib' => '@STDLIB@',
     'archlibexp' => '/opt/gperl/fakearchlib', 'archlib' => '/opt/gperl/fakearchlib',
     'vendorlibexp' => '', 'vendorarchexp' => '',
     'installprivlib' => '@STDLIB@', 'installarchlib' => '/opt/gperl/fakearchlib',
 );
-$^O = 'linux';
 1;
 EOF
 
-GPERL_PERL_PRELOAD=$G/config-overlay.pl $G/bin/perl -MConfig -e 'print "perl $^V as $^X, cc=$Config{cc}\n"'
+GPERL_PERL_PRELOAD=$G/config-overlay.pl $G/bin/perl -MConfig -e 'print "perl $^V as $^X, cc=$Config{cc}, osname=$^O\n"'
+# $^O and $Config{osname} are gperl's own (the system it runs on); the image
+# only checks them, so the survey measures what a user of this gperl gets.
+GPERL_PERL_PRELOAD=$G/config-overlay.pl $G/bin/perl -MConfig -e 'exit($^O eq "linux" && $Config{osname} eq "linux" ? 0 : 1)' || {
+    echo "setup: this gperl reports \$^O as something other than linux" >&2
+    exit 1
+}
