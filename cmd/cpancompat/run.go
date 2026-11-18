@@ -356,6 +356,18 @@ func runSurvey(opts runOptions) error {
 			return fmt.Errorf("docker volume create: %v: %s", err, out)
 		}
 	}
+	// Docker fills an empty volume with what the image has at the mount
+	// point the first time a container mounts it. When the first jobs start
+	// together, they all try that copy at once and all but one fail with
+	// "mkdir .../_data/lib: file exists". One container mounting the volumes
+	// first does the copy before any job starts.
+	if out, err := exec.Command("docker", "run", "--rm", "--network", "none",
+		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+		"-v", r.volume+":/opt/gperl/local",
+		"-v", r.buildVolume+":/work",
+		r.opts.image, "true").CombinedOutput(); err != nil {
+		return fmt.Errorf("filling the volumes from %s: %v: %s", r.opts.image, err, out)
+	}
 	if err := guardNetwork(opts.dataDir); err != nil {
 		return err
 	}
