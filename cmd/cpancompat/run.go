@@ -362,7 +362,7 @@ func runSurvey(opts runOptions) error {
 	// "mkdir .../_data/lib: file exists". One container mounting the volumes
 	// first does the copy before any job starts.
 	if out, err := exec.Command("docker", "run", "--rm", "--network", "none",
-		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--ulimit", "core=0",
 		"-v", r.volume+":/opt/gperl/local",
 		"-v", r.buildVolume+":/work",
 		r.opts.image, "true").CombinedOutput(); err != nil {
@@ -671,7 +671,7 @@ func (r *runner) attempt(d *dist, attempts, seq int) *result {
 	// under, waits for a signal from the X server that a shell running as
 	// PID 1 never gets.
 	cmd := exec.CommandContext(ctx, "docker", "run", "--init", "--name", name, "--network", surveyNetwork,
-		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--ulimit", "core=0",
 		"--cpus", r.opts.cpus, "--memory", r.opts.memory, "--pids-limit", "2048",
 		"-v", r.volume+":/opt/gperl/local",
 		"-v", r.buildVolume+":/work",
