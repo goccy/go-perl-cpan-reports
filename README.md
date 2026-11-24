@@ -195,7 +195,7 @@ make survey GPERL=path/to/gperl GPERL_COMMIT=<the go-perl commit gperl was built
 
   ```yaml
   mounts:
-    - location: /path/to/go-perl-cpan-testers/data/gperl/archives
+    - location: /path/to/go-perl-cpan-reports/data/gperl/archives
       writable: false
   ```
 

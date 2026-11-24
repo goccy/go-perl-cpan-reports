@@ -1,4 +1,4 @@
-module github.com/goccy/go-perl-cpan-testers
+module github.com/goccy/go-perl-cpan-reports
 
 go 1.25.0
 
