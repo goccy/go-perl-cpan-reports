@@ -1,0 +1,148 @@
+{{define "content"}}
+{{- $s := .Site}}{{$v := .Dist}}
+<p class="crumbs"><a href="../dists.html">Distributions</a></p>
+<h1>{{$v.Dist}}</h1>
+<dl class="facts">
+  {{- with $v.Ref}}
+  <dt>release</dt><dd>{{.Release}}</dd>
+  <dt>reference set</dt><dd>in it: {{num .LinuxPass}} passing and {{num .LinuxFail}} failing CPAN Testers reports on perl {{$s.Snapshot.Perl}} on Linux</dd>
+  <dt>dependents</dt><dd>{{num .DependentsTotal}} distributions of CPAN need it, directly or indirectly</dd>
+  {{- else}}
+  <dt>reference set</dt><dd>not in it; it was run because distributions of the set need it</dd>
+  {{- end}}
+  <dt>elsewhere</dt><dd><a href="https://metacpan.org/dist/{{$v.Dist}}">MetaCPAN</a></dd>
+</dl>
+
+{{- range $v.Runs}}
+{{- $r := .Run}}{{$known := .Known}}
+<section class="run">
+<h2>On {{$r.Label}}{{with $r.Meta.Interpreter.Version}} {{.}}{{end}} <span class="muted">run <code>{{$r.Name}}</code></span></h2>
+{{- with .Result}}
+<p class="verdict"><span class="outcome o-{{.Outcome}}">{{.Outcome}}</span> {{outcomeTitle .Outcome}}{{if .OwnOutcome}}; run all the same, it ended in <code>{{.OwnOutcome}}</code>{{end}}.
+  {{- if .Shipped}} The interpreter ships it; its tests ran against that copy.{{end}}
+  <span class="muted">{{.Release}}{{if gt .Attempts 1}}, {{.Attempts}} attempts{{end}}, {{duration .Seconds}}, finished {{date .Finished}}</span></p>
+
+{{- if .Phases}}
+<ol class="phases" aria-label="phases">
+  {{- range .Phases}}
+  <li class="{{if or .TimedOut .OutputLimited}}bad{{else if ne .Status 0}}{{if eq .Phase "configure"}}warn{{else}}bad{{end}}{{end}}">{{.Phase}} <span class="muted">{{duration .Seconds}}{{if ne .Status 0}}, status {{.Status}}{{end}}{{if .TimedOut}}, out of time{{end}}{{if .OutputLimited}}, output limit{{end}}</span></li>
+  {{- end}}
+</ol>
+{{- end}}
+{{- end}}
+
+{{- if not .Result}}
+<p class="verdict"><span class="outcome">no record</span> the run has no result for it.</p>
+{{- end}}
+
+{{- with .Failure}}
+<dl class="facts">
+  <dt>cause</dt><dd>{{causeTitle .Cause}}</dd>
+  {{- with $known}}
+  <dt>analysis</dt><dd>{{.Evidence}} Attributed test files: {{range $i, $f := .Tests}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}}.
+    <a href="../index.html#known-limitations">About this limitation</a></dd>
+  {{- end}}
+  {{- if .BlockedBy}}
+  <dt>blocked by</dt><dd>{{range $i, $d := .BlockedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
+  {{- end}}
+  {{- if and .RootBlockers (ne (join .RootBlockers ",") (join .BlockedBy ","))}}
+  <dt>where that ends</dt><dd>{{range $i, $d := .RootBlockers}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
+  {{- end}}
+  {{- if .Phase}}
+  <dt>failing phase</dt><dd>{{.Phase}}{{if .PhaseStatus}}, status {{.PhaseStatus}}{{end}}{{if .TimedOut}}, out of time{{end}}</dd>
+  {{- end}}
+  {{- if .Symbols}}
+  <dt>names reported missing</dt><dd>{{range $i, $n := .Symbols}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}</dd>
+  {{- end}}
+</dl>
+{{- end}}
+
+{{- if .Unmet}}
+<h3>Requirements not met when it was configured</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>module</th><th>wanted</th><th>installed</th></tr></thead>
+  <tbody>{{range .Unmet}}<tr><td><code>{{.Module}}</code></td><td>{{.Wanted}}</td><td>{{or .Have "none"}}</td></tr>{{end}}</tbody>
+</table></div>
+{{- end}}
+
+{{- with .Failure}}{{if .FailingTests}}
+<h3>Failing test files <span class="muted">{{len .FailingTests}} of {{.TestFiles}}</span></h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>file</th><th class="num">planned</th><th class="num">run</th><th class="num">failed</th><th class="num">exit</th></tr></thead>
+  <tbody>{{range .FailingTests}}<tr><td><code>{{.File}}</code></td><td class="num">{{.Planned}}</td><td class="num">{{.Run}}</td><td class="num">{{.Failed}}</td><td class="num">{{.Exit}}</td></tr>{{end}}</tbody>
+</table></div>
+{{- end}}{{end}}
+
+{{- with .Failure}}{{if .Evidence}}
+<h3>Evidence</h3>
+<pre class="evidence">{{range .Evidence}}{{.}}
+{{end}}</pre>
+{{- end}}{{end}}
+
+{{- with .Failure}}{{with .Stuck}}
+<h3>Shortly before the time limit: {{.Kind}}</h3>
+<div class="table-wrap"><table>
+  <thead><tr><th>process</th><th class="num">running for</th><th class="num">CPU</th><th>state</th><th>waits in</th></tr></thead>
+  <tbody>{{range .Processes}}<tr><td><code>{{join .Args " "}}</code></td><td class="num">{{duration .ElapsedSeconds}}</td><td class="num">{{.CPUPercent}}%</td><td>{{.State}}</td><td><code>{{.WChan}}</code></td></tr>{{end}}</tbody>
+</table></div>
+{{- end}}{{end}}
+
+{{- with .Log}}
+<h3>End of {{.Log}} <span class="muted">{{num .Bytes}} bytes in all</span></h3>
+<pre class="log">{{.Text}}</pre>
+{{- end}}
+
+{{- if .Blocks}}
+<h3>Blocked by it in this run <span class="muted">{{len .Blocks}}</span></h3>
+<p>{{range $i, $d := first 200 .Blocks}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}{{if gt (len .Blocks) 200}} and {{num (sub (len .Blocks) 200)}} more{{end}}</p>
+{{- end}}
+
+{{- with .Result}}{{if and (eq .Outcome "pass") .Tests}}
+<p class="muted">{{len .Tests}} test files ran.</p>
+{{- end}}{{end}}
+
+{{- with .Static}}
+<h3 id="static">Static build{{with $r.Meta.Static}} <span class="muted">with gperl {{.Gperl.Main.Version}}; the tests above ran on {{$r.Label}}{{with $r.Meta.Interpreter.Version}} {{.}}{{end}}</span>{{end}}</h3>
+<p class="verdict"><span class="outcome s-{{.Rec.State}}">{{.Category.Title}}</span>
+  {{- if .Libraries}}: {{range $i, $l := .Libraries}}{{if $i}}, {{end}}<code>lib{{$l}}</code>{{end}}{{end}}.
+  <span class="muted">{{.Rec.Release}}{{if gt .Rec.Attempts 1}}, {{.Rec.Attempts}} attempts{{end}}, {{duration .Rec.Seconds}}, finished {{date .Rec.Finished}}</span></p>
+<dl class="facts">
+  {{- if .Rec.BlockedBy}}
+  <dt>blocked by</dt><dd>{{range $i, $d := .Rec.BlockedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}#static">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
+  {{- end}}
+  {{- if .Rec.CausedBy}}
+  <dt>found in</dt><dd>the native modules of {{range $i, $d := .Rec.CausedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}#static">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
+  {{- end}}
+  {{- if .Rec.Loaded}}
+  <dt>loads</dt><dd>{{range $i, $m := .Rec.Loaded}}{{if $i}}, {{end}}<code>{{$m}}</code>{{end}}</dd>
+  {{- end}}
+  {{- if .Rec.Closure}}
+  <dt>carries</dt><dd>{{num (len .Rec.Closure)}} distributions{{with .Rec.NativeModules}}, {{num (len .)}} native modules{{end}}</dd>
+  {{- end}}
+  {{- with .Rec.Binary}}
+  <dt>binary</dt><dd>{{num .Bytes}} bytes{{with .Interp}}; program interpreter <code>{{.}}</code>{{end}}{{if .Needed}}; shared libraries {{range $i, $n := .Needed}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}{{end}}</dd>
+  {{- end}}
+</dl>
+{{- if .Rec.ExternalLibs}}
+<div class="table-wrap"><table>
+  <thead><tr><th>library</th><th>linked by</th><th>static archive</th></tr></thead>
+  <tbody>{{range .Rec.ExternalLibs}}<tr><td><code>lib{{.Name}}</code></td><td>{{$d := .Dist}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}</td><td>{{if .StaticArchive}}{{if eq .From "module_directory"}}from a distribution's tree (an Alien library){{else}}from the system{{end}}{{else}}none{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+{{- end}}
+{{- if .Rec.Phases}}
+<ol class="phases" aria-label="phases of the static build">
+  {{- range .Rec.Phases}}
+  <li class="{{if or .TimedOut (ne .Status 0)}}bad{{end}}">{{.Phase}} <span class="muted">{{duration .Seconds}}{{if ne .Status 0}}, status {{.Status}}{{end}}{{if .TimedOut}}, out of time{{end}}</span></li>
+  {{- end}}
+</ol>
+{{- end}}
+{{- with .Log}}
+<h4>End of {{.Log}} <span class="muted">{{num .Bytes}} bytes in all</span></h4>
+<pre class="log">{{.Text}}</pre>
+{{- end}}
+<p class="muted">A program that loads its modules, built by gperl into one binary with everything it needs, linked fully
+statically, and run where there is nothing but the binary. <a href="../methodology.html#static">How it is measured</a>.</p>
+{{- end}}
+</section>
+{{- end}}
+{{end}}

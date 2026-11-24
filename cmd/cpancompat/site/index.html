@@ -1,0 +1,216 @@
+{{define "content"}}
+{{- $s := .Site}}{{$sub := $s.Subject}}{{$ref := $s.Reference}}{{$c := $s.Comparison}}{{$n := $s.Snapshot.ReferenceDistributions}}
+<h1>How much of CPAN passes its own tests on {{$sub.Label}}</h1>
+<p class="lede">Each distribution of the reference set (the latest CPAN releases whose
+<a href="https://www.cpantesters.org/">CPAN Testers</a> reports on perl {{$s.Snapshot.Perl}} pass more often
+than they fail on Linux, {{num $n}} of {{num $s.Snapshot.Distributions}}) is configured, built, tested and installed
+the way a CPAN client does it, in a container of its own, with everything it needs installed the same way
+before it{{if $ref}}: once with {{$sub.Label}} as the perl command, and once with {{$ref.Label}} {{$ref.Meta.Interpreter.Version}} itself
+in the same environment{{end}}. <a href="methodology.html">How it is measured</a>.</p>
+
+<section class="tiles" aria-label="Headline numbers">
+  <div class="tile">
+    <div class="value">{{pct (index $sub.Coverage.Outcomes "pass") $n}}</div>
+    <div class="label">of the reference set passes on {{$sub.Label}}: {{num (index $sub.Coverage.Outcomes "pass")}} of {{num $n}}</div>
+  </div>
+  {{- if $ref}}
+  <div class="tile">
+    <div class="value">{{pct (index $ref.Coverage.Outcomes "pass") $n}}</div>
+    <div class="label">passes on {{$ref.Label}} {{$ref.Meta.Interpreter.Version}} in the same harness: {{num (index $ref.Coverage.Outcomes "pass")}} of {{num $n}}</div>
+  </div>
+  <div class="tile">
+    <div class="value">{{share $c.ShareOfReferencePasses}}</div>
+    <div class="label">of what {{$ref.Label}} passes also passes on {{$sub.Label}}: {{num (bucketCount "both_pass")}} of {{num $c.ReferencePasses}}</div>
+  </div>
+  {{- end}}
+</section>
+
+<section>
+<h2>What was measured</h2>
+<dl class="facts">
+  {{- range $r := $s.Shown}}
+  <dt>{{$r.Label}}</dt>
+  <dd>{{if $r.Meta.Interpreter.Version}}version {{$r.Meta.Interpreter.Version}}{{end}}
+    {{- if $r.Meta.Interpreter.Commit}}built from commit <code title="{{$r.Meta.Interpreter.Commit}}">{{short $r.Meta.Interpreter.Commit}}</code>{{end}};
+    run <code>{{$r.Name}}</code>, {{dates $r.Meta.FirstResult $r.Meta.LastResult}};
+    image built on <code>{{$r.Meta.BaseImage}}</code>{{if $r.Meta.Provisional}}; <strong>provisional</strong>{{end}}</dd>
+  {{- with $r.Meta.Static}}
+  <dt>static builds</dt>
+  <dd>of what passed on {{$r.Label}}{{with $r.Meta.Interpreter.Version}} {{.}}{{end}}: made with gperl {{.Gperl.Main.Version}}, {{dates .FirstResult .LastResult}}</dd>
+  {{- end}}
+  {{- end}}
+  <dt>CPAN</dt>
+  <dd>the package index and the latest releases on MetaCPAN of {{day $s.Snapshot.FetchedAt}}:
+    {{num $s.Snapshot.Distributions}} distributions; the reference set: {{num $n}} of them</dd>
+  {{- with index $sub.Meta.Invocations 0}}
+  <dt>Limits</dt>
+  <dd>{{.Jobs}} distributions at a time, each container with <code>--cpus {{.CPUs}}</code> and <code>--memory {{.Memory}}</code>;
+    the tests of a distribution may run {{duration .TestSeconds}}, a whole container {{duration .WallSeconds}}; on {{.Platform}}</dd>
+  {{- end}}
+</dl>
+</section>
+
+{{- if $c}}
+<section>
+<h2>{{$sub.Label}} against {{$ref.Label}}</h2>
+<p>How each reference distribution went on the two. A distribution a run has no record of counts as not passing.</p>
+<div class="stack" role="img" aria-label="{{range buckets}}{{bucketTitle .}} {{pct (index $c.Buckets .) $c.Distributions}}; {{end}}">
+  {{- range buckets}}<span class="seg b-{{.}}" style="flex-grow: {{index $c.Buckets .}}" title="{{bucketTitle .}}: {{num (index $c.Buckets .)}} ({{pct (index $c.Buckets .) $c.Distributions}})">{{if eq . "both_pass"}}<span class="seg-label">{{bucketTitle .}} {{pct (index $c.Buckets .) $c.Distributions}}</span>{{end}}</span>{{end}}
+</div>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>bucket</th><th class="num">distributions</th><th class="num">share</th></tr></thead>
+  <tbody>
+  {{- range buckets}}
+  <tr><td><span class="swatch b-{{.}}" aria-hidden="true"></span><a href="dists.html#bucket={{.}}">{{bucketTitle .}}</a></td>
+    <td class="num">{{num (index $c.Buckets .)}}</td><td class="num">{{pct (index $c.Buckets .) $c.Distributions}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+<p>The {{num (bucketCount "subject_only_fails")}} distributions only {{$sub.Label}} fails, by their outcome on
+{{$sub.Label}}: {{subjectOnlyOutcomes}}.</p>
+</section>
+{{- end}}
+
+<section>
+<h2>Outcomes</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>outcome</th><th>what it means</th><th class="num">{{$sub.Label}}</th>{{if $ref}}<th class="num">{{$ref.Label}}</th>{{end}}</tr></thead>
+  <tbody>
+  {{- range $o := outcomes}}{{if or (index $sub.Coverage.Outcomes $o) (and $ref (index $ref.Coverage.Outcomes $o))}}
+  <tr><td><a href="dists.html#subject={{$o}}"><code>{{$o}}</code></a></td><td>{{outcomeTitle $o}}</td>
+    <td class="num">{{num (index $sub.Coverage.Outcomes $o)}} <span class="muted">{{pct (index $sub.Coverage.Outcomes $o) $n}}</span></td>
+    {{- if $ref}}<td class="num">{{num (index $ref.Coverage.Outcomes $o)}} <span class="muted">{{pct (index $ref.Coverage.Outcomes $o) $n}}</span></td>{{end}}</tr>
+  {{- end}}{{end}}
+  {{- if or (lt $sub.Coverage.Recorded $n) (and $ref (lt $ref.Coverage.Recorded $n))}}
+  <tr><td>no record</td><td>the run has no result for it</td>
+    <td class="num">{{num (sub $n $sub.Coverage.Recorded)}}</td>{{if $ref}}<td class="num">{{num (sub $n $ref.Coverage.Recorded)}}</td>{{end}}</tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+</section>
+
+{{- if $sub.StaticCounts}}
+<section id="static">
+<h2>Static builds</h2>
+<p>For each reference distribution whose tests passed on {{$sub.Label}}: whether gperl builds a program that loads it
+into one binary, linked fully statically, that runs where there is nothing but the binary.
+{{- with $sub.Meta.Static}} The tests ran on {{$sub.Label}}{{with $sub.Meta.Interpreter.Version}} {{.}}{{end}}{{with $sub.Meta.Interpreter.Commit}} ({{short .}}){{end}};
+the static builds were made with gperl {{.Gperl.Main.Version}} ({{.CC}}, {{.LibC}}, {{.Go}}).{{end}}
+<a href="methodology.html#static">How it is measured</a>{{if $s.Checker}}; <a href="check.html">check a cpanfile</a>{{end}}.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>static build</th><th class="num">distributions</th></tr></thead>
+  <tbody>
+  {{- range $sub.StaticCounts}}
+  <tr><td><a href="dists.html#static={{.Category.ID}}">{{.Category.Title}}</a></td><td class="num">{{num .Count}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
+{{- if and $c $c.RootBlockers}}
+<section>
+<h2>What blocks the most</h2>
+<p>A distribution that does not install blocks the ones that need it. Following the chains of blocking down to
+the distributions that were run and did not install: those that block the most of what only {{$sub.Label}} fails.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>distribution</th><th class="num">blocks</th><th>on {{$sub.Label}}</th><th>cause</th><th>on {{$ref.Label}}</th><th class="num">dependents</th></tr></thead>
+  <tbody>
+  {{- range firstRoots 25 $c.RootBlockers}}
+  <tr><td>{{with page .Dist}}<a href="d/{{.}}">{{end}}{{.Dist}}{{if page .Dist}}</a>{{end}}</td>
+    <td class="num">{{num .Blocked}}</td><td><code>{{or .SubjectOutcome "no record"}}</code></td>
+    <td>{{causeTitle .Cause}}</td><td><code>{{or .ReferenceOutcome "no record"}}</code></td><td class="num">{{num .DependentsTotal}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
+{{- if $s.Causes}}
+<section>
+<h2>Causes</h2>
+<p>Why the reference distributions that did not pass on {{$sub.Label}} failed, the blocked ones left out, as the
+logs tell it{{if $s.ForkLimitation}}, or as analysis recorded it for a <a href="#known-limitations">known
+limitation</a>{{end}} (<a href="methodology.html#causes">how causes are decided</a>).</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>cause</th><th class="num">distributions</th>{{if $ref}}<th class="num">of them passing on {{$ref.Label}}</th>{{end}}</tr></thead>
+  <tbody>
+  {{- range $s.Causes}}
+  <tr><td><a href="dists.html#cause={{.Cause}}">{{causeTitle .Cause}}</a></td><td class="num">{{num .Distributions}}</td>{{if $ref}}<td class="num">{{num .ReferencePasses}}</td>{{end}}</tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
+{{- with $s.ForkLimitation}}
+<section id="known-limitations">
+<h2>Known limitations</h2>
+<h3>{{causeTitle .Cause}}</h3>
+<p>go-perl does not start a new process for <code>fork</code>. Like perl on Windows, it makes a pseudo-process:
+the interpreter's memory is copied, and the child runs on a goroutine of the same operating system process.
+Memory that native (XS) modules allocate in C is not part of the interpreter's memory, so it is not copied: the C
+structures behind DBI handles, SSL contexts, libev event loops, the modules' own objects. A child using them would
+share them with its parent. So native code is not available in a forked child: calling an XSUB, loading a native
+module or running a hook one installed (an op checker, a keyword plugin, magic) dies with a Perl error, which a
+program can catch, such as</p>
+<pre>Foo::bar: native modules cannot be used in a forked child (.../auto/Foo/Foo.so) at script.pl line 12.</pre>
+<p>Native code is not run for objects destroyed in the child either, and the parent is not affected. Pure-Perl code
+works in a forked child, and perl itself, whose <code>fork</code> makes a real process, has no such limitation.</p>
+<p>A failure takes this cause when go-perl's message is among its evidence lines and no crash is, and a phase
+that ran out of time when the test file running at the limit printed it. A child whose output was discarded leaves
+no message in the log: those failures are attributed by analysis, recorded in the
+repository (<code>cmd/cpancompat/known-causes.json</code>): for each distribution, the test files the analysis tied
+to this limitation and the evidence. A distribution takes the cause from that file only when every test file that
+failed in the run is one of them; otherwise the cause its log tells stands.</p>
+<p>In run <code>{{$sub.Name}}</code>, {{num (len .Dists)}} distribution{{if ne (len .Dists) 1}}s{{end}} failed for
+this reason, {{num .InReference}} of them in the reference set{{if .Dists}}:{{else}}.{{end}}</p>
+{{- if .Dists}}
+<p>{{range $i, $d := .Dists}}{{if $i}}, {{end}}<a href="d/{{page $d}}">{{$d}}</a>{{end}}</p>
+{{- end}}
+</section>
+{{- end}}
+
+{{- if and $c $c.OwnGroups}}
+<section>
+<h2>What only {{$sub.Label}} fails, grouped</h2>
+<p>The distributions only {{$sub.Label}} fails that were not blocked, grouped by outcome, cause and the first
+line of their evidence (file names, line numbers and paths left out). The largest groups first; within a group the
+most depended upon first.</p>
+{{- range firstGroups 40 $c.OwnGroups}}
+<details class="group">
+  <summary><span class="count">{{len .Dists}}</span> <code>{{.Outcome}}</code> · {{causeTitle .Cause}}{{with .Signature}} · <span class="sig">{{.}}</span>{{end}}</summary>
+  <p>{{range $i, $d := first 80 .Dists}}{{if $i}}, {{end}}<a href="d/{{page $d}}">{{$d}}</a>{{end}}{{if gt (len .Dists) 80}} and {{num (sub (len .Dists) 80)}} more{{end}}</p>
+</details>
+{{- end}}
+</section>
+{{- end}}
+
+<section>
+<h2>Runs</h2>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>run</th><th>interpreter</th><th>results</th><th class="num">recorded</th><th>limits</th><th></th></tr></thead>
+  <tbody>
+  {{- range $s.Runs}}
+  <tr><td><code>{{.Name}}</code></td>
+    <td>{{.Label}}{{with .Meta.Interpreter.Version}} {{.}}{{end}}{{with .Meta.Interpreter.Commit}} <code title="{{.}}">{{short .}}</code>{{end}}</td>
+    <td>{{dates .Meta.FirstResult .Meta.LastResult}}</td><td class="num">{{num .Meta.Recorded}}</td>
+    <td>{{with index .Meta.Invocations 0}}{{.Jobs}} jobs, <code>--cpus {{.CPUs}} --memory {{.Memory}}</code>, tests {{duration .TestSeconds}}{{end}}{{if gt (len .Meta.Invocations) 1}} (and {{sub (len .Meta.Invocations) 1}} more invocation{{if gt (len .Meta.Invocations) 2}}s{{end}}){{end}}</td>
+    <td>{{if .Meta.Provisional}}provisional{{end}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+</section>
+{{end}}

@@ -1,0 +1,25 @@
+{{define "content"}}
+{{- $s := .Site}}
+<h1>Check a cpanfile</h1>
+<p class="lede">Paste a <code>cpanfile</code>, a <code>cpanfile.snapshot</code> or both, or choose the files, to see
+whether what they require passed its tests on {{$s.Subject.Label}}{{with $s.Subject.Meta.Interpreter.Version}} {{.}}{{end}}
+and builds into a static binary with gperl{{with $s.Subject.Meta.Static}} {{.Gperl.Main.Version}}{{end}}. They are
+read in your browser and sent nowhere. The cpanfile is not run as Perl: statements in other forms than the usual ones
+are listed, not guessed at. <a href="methodology.html#checker">How it decides</a>.</p>
+
+<form class="check" id="check">
+  <label for="cpanfile">cpanfile</label>
+  <textarea id="cpanfile" name="cpanfile" spellcheck="false" placeholder="requires 'Mojolicious', '9.0';&#10;requires 'JSON::XS';&#10;on test => sub {&#10;    requires 'Test::More', '0.98';&#10;};"></textarea>
+  <label for="snapshot">cpanfile.snapshot (optional)</label>
+  <textarea id="snapshot" name="snapshot" spellcheck="false" placeholder="# carton snapshot format: version 1.0"></textarea>
+  <div class="row">
+    <label>Files <input type="file" name="files" multiple></label>
+    <button type="submit">Check</button>
+  </div>
+</form>
+<p class="count" id="status" aria-live="polite">Loading the data…</p>
+<noscript><p>The checker needs JavaScript. The data is in <a href="check.json">check.json</a>.</p></noscript>
+<div id="results"></div>
+<script src="assets/cpanfile.js"></script>
+<script src="assets/check.js"></script>
+{{end}}

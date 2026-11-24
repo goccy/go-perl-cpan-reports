@@ -31,3 +31,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# What a survey and the site make in the checkout (Makefile): the built
+# command, the data directories and the generated site.
+/bin/
+/data/
+/_site/

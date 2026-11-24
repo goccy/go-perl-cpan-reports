@@ -1,0 +1,34 @@
+{{define "content"}}
+{{- $s := .Site}}
+<h1>Distributions</h1>
+<p class="lede">The {{num $s.Snapshot.ReferenceDistributions}} distributions of the reference set, with how each went on
+{{$s.Subject.Label}}{{with $s.Reference}} and on {{.Label}}{{end}}, the cause of a failure on {{$s.Subject.Label}}, and how
+many distributions of all of CPAN need it, directly or indirectly. Search by name, filter, and open a distribution for its
+phases, failing tests, evidence and log.</p>
+
+<form class="filters" id="filters" role="search" onsubmit="return false">
+  <label>Name <input type="search" name="q" autocomplete="off" placeholder="e.g. Moose"></label>
+  {{- if $s.Reference}}
+  <label>Comparison <select name="bucket"><option value="">all</option></select></label>
+  {{- end}}
+  <label>On {{$s.Subject.Label}} <select name="subject"><option value="">all</option></select></label>
+  {{- with $s.Reference}}
+  <label>On {{.Label}} <select name="reference"><option value="">all</option></select></label>
+  {{- end}}
+  <label>Cause <select name="cause"><option value="">all</option></select></label>
+  {{- if $s.Subject.StaticCounts}}
+  <label>Static build <select name="static"><option value="">all</option></select></label>
+  {{- end}}
+  <label>Order <select name="order"><option value="dependents">most dependents first</option><option value="name">by name</option></select></label>
+</form>
+<p class="count" id="count" aria-live="polite">Loading…</p>
+<noscript><p>The table needs JavaScript. The data is in <a href="dists.json">dists.json</a>.</p></noscript>
+<div class="table-wrap">
+<table class="dists" id="dists">
+  <thead><tr><th>distribution</th><th>release</th><th>{{$s.Subject.Label}}</th>{{with $s.Reference}}<th>{{.Label}}</th>{{end}}<th>cause on {{$s.Subject.Label}}</th>{{if $s.Subject.StaticCounts}}<th>static build{{with $s.Subject.Meta.Static}} (gperl {{.Gperl.Main.Version}}){{end}}</th>{{end}}<th class="num">dependents</th></tr></thead>
+  <tbody></tbody>
+</table>
+</div>
+<p><button type="button" id="more" hidden>Show more</button></p>
+<script src="assets/dists.js"></script>
+{{end}}

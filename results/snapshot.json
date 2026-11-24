@@ -1,0 +1,9 @@
+{
+  "fetched_at": "2026-11-20T00:52:39Z",
+  "packages_url": "https://cpan.metacpan.org/modules/02packages.details.txt.gz",
+  "packages_sha256": "cf7f76275d6e5ad3336ee35d0578723c2a9951b3073a66be6a190cad74fbb58c",
+  "releases": 42110,
+  "distributions": 42079,
+  "perl": "5.44.0",
+  "reference_distributions": 14437
+}

@@ -1,0 +1,49 @@
+{
+  "run": "perl",
+  "interpreter": {
+    "name": "perl",
+    "version": "5.44.0"
+  },
+  "base_image": "perl:5.44.0-slim-bookworm",
+  "perl": "5.44.0",
+  "packages_sha256": "41048f6d83a9aec5fb208463d385c588e24d4877f0326003b68aeb794e222a28",
+  "provisional": true,
+  "note": "perl 5.44.0 itself, from the official image perl:5.44.0-slim-bookworm, in the same environment and harness as the go-perl run. One distribution whose tests signal process 1 (Async-Event-Interval) was run again with the harness that ignores those signals.",
+  "first_result": "2026-11-14T18:31:53Z",
+  "last_result": "2026-11-14T22:27:05Z",
+  "recorded": 14715,
+  "invocations": [
+    {
+      "image": "cpancompat-ref:5.44.0-h1",
+      "platform": "linux/arm64",
+      "interpreter": "perl@5.44.0",
+      "harness": {
+        "module": "github.com/goccy/go-perl/tools/cpancompat",
+        "revision": "7769263a619b8ab6388fa7b36c4bb58faf1f1678"
+      },
+      "jobs": 16,
+      "cpus": "1",
+      "memory": "1500m",
+      "wall_seconds": 7200,
+      "test_seconds": 300
+    },
+    {
+      "image": "cpancompat-ref:5.44.0-h3",
+      "platform": "linux/arm64",
+      "interpreter": "perl@5.44.0",
+      "harness": {
+        "module": "github.com/goccy/go-perl/tools/cpancompat",
+        "revision": "2fbb2621c23f74cb4a429f7b9003588c59846f01"
+      },
+      "jobs": 2,
+      "cpus": "1",
+      "memory": "1500m",
+      "wall_seconds": 7200,
+      "test_seconds": 300,
+      "redo": [
+        "driver_failed"
+      ]
+    }
+  ],
+  "network": "The phases up to the build reach the internet, but not private, link-local or shared address space, the machine that runs the containers or its host; DNS goes only to the resolver Docker gives the containers. The test phase runs with no network but loopback."
+}

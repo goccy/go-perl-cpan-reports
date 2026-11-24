@@ -1,0 +1,256 @@
+{{define "content"}}
+{{- $s := .Site}}{{$sub := $s.Subject}}{{$ref := $s.Reference}}
+<h1>Methodology and reproduction</h1>
+<p class="lede">What the numbers on this site count, how each distribution is built and tested, how its outcome and
+the cause of a failure are decided, and how to make a survey yourself. Everything here is done by the
+<code>cpancompat</code> command of this repository; its source is the reference.</p>
+
+<nav class="toc" aria-label="Contents">
+  <a href="#reference-set">The reference set</a>
+  <a href="#harness">Building and testing a distribution</a>
+  <a href="#outcomes">Outcomes</a>
+  <a href="#causes">Causes</a>
+  <a href="#comparison">The comparison</a>
+  {{- if $sub.Meta.Static}}
+  <a href="#static">Static builds</a>
+  {{- end}}
+  {{- if $s.Checker}}
+  <a href="#checker">The cpanfile checker</a>
+  {{- end}}
+  <a href="#reproduce">Reproducing a survey</a>
+  <a href="#runs">The runs on this site</a>
+</nav>
+
+<section id="reference-set">
+<h2>The reference set</h2>
+<p>A survey starts from a snapshot of CPAN: the package index (<code>02packages.details.txt.gz</code>, the index
+CPAN clients resolve modules against) and the metadata of every release MetaCPAN marks latest, one release per
+distribution: {{num $s.Snapshot.Distributions}} distributions in the snapshot of {{day $s.Snapshot.FetchedAt}}.
+Each declared requirement is resolved to the distribution that provides the module, which gives the dependency
+graph: what each distribution needs to be configured, built, tested and run, and how many distributions need it,
+directly or indirectly (its dependents).</p>
+<p>Not every distribution on CPAN works on a given perl, or on Linux, or at all. The survey measures against the
+distributions that are known to work on the perl version the interpreter is built from:
+the <strong>reference set</strong> is the latest releases whose
+<a href="https://www.cpantesters.org/">CPAN Testers</a> reports on perl {{$s.Snapshot.Perl}}, made on Linux, pass more
+often than they fail. That is {{num $s.Snapshot.ReferenceDistributions}} distributions. A release nobody has tested on
+that perl is outside the set; it is still built and tested when a distribution of the set needs it.</p>
+</section>
+
+<section id="harness">
+<h2>Building and testing a distribution</h2>
+<p>Every distribution of the set is run with everything it needs, in dependency order, the most depended upon
+first. Its requirements are installed by the same interpreter, the same way, not taken from elsewhere. Each
+distribution gets a container of its own, made from one image:</p>
+<ul>
+  <li>Debian (bookworm) with a C toolchain, the tools build scripts run and the development files of the C
+  libraries CPAN distributions bind to, the same for both interpreters. In the image for go-perl the perl command is
+  <code>gperl</code>; the image for perl itself is the same environment built on the official perl image.</li>
+  <li>The distribution runs as an unprivileged user in a login environment, as CPAN clients and smokers do, with
+  no capabilities (<code>--cap-drop ALL</code>, <code>no-new-privileges</code>), a limit on processes, memory and
+  CPUs, the archives mounted read-only and no writable directory of the machine that runs it. Its records are
+  copied out of the container as plain files and directories only. CPAN code is untrusted: the harness is built to
+  contain it.</li>
+  <li>Network: {{with $sub.Meta.Network}}{{.}}{{end}}</li>
+  <li>The environment CPAN clients set: <code>PERL_MM_USE_DEFAULT=1</code>, <code>NONINTERACTIVE_TESTING=1</code>,
+  <code>PERL_USE_UNSAFE_INC=1</code>, and a virtual X display for the tests.</li>
+</ul>
+<p>The phases, each with a time limit, and a limit of 256 MiB on what a phase may write:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>phase</th><th>what runs</th><th class="num">time limit</th></tr></thead>
+  <tbody>
+  <tr><td>unpack</td><td>the archive is unpacked into a build directory</td><td class="num">5 min</td></tr>
+  <tr><td>configure</td><td><code>perl Build.PL</code> when the distribution has one (and Module::Build is installed when it also has a Makefile.PL), otherwise <code>perl Makefile.PL</code>; it succeeded when it wrote its build script</td><td class="num">15 min</td></tr>
+  <tr><td>prerequisites</td><td>the requirements the distribution computed (MYMETA) are compared with what is installed</td><td class="num">5 min</td></tr>
+  <tr><td>build</td><td><code>make</code> or <code>./Build</code></td><td class="num">30 min</td></tr>
+  <tr><td>test</td><td><code>make test</code> or <code>./Build test</code>, without network; the harness records every test file's result</td><td class="num">set per run{{with index $sub.Meta.Invocations 0}} ({{duration .TestSeconds}} here){{end}}</td></tr>
+  <tr><td>install, publish</td><td>installed into a staging directory and published into the run's installation, where the distributions that need it find it</td><td class="num">10 min each</td></tr>
+  </tbody>
+</table>
+</div>
+<p>A distribution whose requirements are not all met is still built and tested, as CPAN.pm does. When it fails
+while a requirement it computed is unmet, it waits for the distribution that provides the requirement and runs
+again once that one has finished (up to four attempts). A distribution is installed whenever it builds, whatever
+its tests say, so that the distributions that need it can be tried.</p>
+</section>
+
+<section id="outcomes">
+<h2>Outcomes</h2>
+<p>Each distribution ends with one outcome, from the phases it went through:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>outcome</th><th>meaning</th></tr></thead>
+  <tbody>
+  {{- range outcomes}}
+  <tr><td><code>{{.}}</code></td><td>{{outcomeTitle .}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+<p><code>blocked</code> and <code>prerequisites_unmet</code> put a failure down to what the distribution lacked: it
+did not pass, and a distribution providing a module it lacked did not install (blocked), or a requirement it
+computed cannot be met at all, such as a newer perl or a module no distribution provides (prerequisites_unmet).
+It was run anyway, and its page shows how that went.</p>
+</section>
+
+<section id="causes">
+<h2>Causes</h2>
+<p>Why a distribution that did not pass failed is read from its records and the log of its failing phase. The
+logs are other programs' output (make, the C compiler, perl, the test harness, the distribution's own scripts), so
+this is done by the patterns of their messages:</p>
+<ol>
+  <li>The <strong>evidence lines</strong> are the lines of the log that report an error (compiler and linker
+  errors, <code>Can't locate</code>, <code>panic</code>, failed tests, …): for failing test files, all of those the
+  harness printed for each of them, of which a distribution's page shows the first 8 and the one that tells the
+  cause; otherwise the first 8 of the log; without any, the last lines.</li>
+  <li>The first cause, in the order of the table, whose messages appear in the evidence is the cause.</li>
+  <li>A phase that ran out of time is classified by what its processes were doing 15 seconds before the limit:
+  waiting without using the CPU (blocked), one program on the CPU for minutes (spinning), or a program that started
+  recently on the CPU (slow: still going through its test files). On go-perl, where the test file running at the
+  limit printed go-perl's message for a forked child that was to run native code, the child died and its parent
+  waited for it: the phase takes the cause of that limitation instead.</li>
+  <li>The <strong>known limitation</strong> of go-perl, that native modules cannot be used in a forked child, is
+  told by go-perl's message, except where the evidence also shows a crash, and for a phase that ran out of
+  time as the item above says. A child whose output was discarded leaves
+  no message, so for those failures it is given by analysis instead: the repository records, for each distribution,
+  the test files the analysis tied to it and the evidence (<code>cmd/cpancompat/known-causes.json</code>). In a
+  go-perl run, a distribution whose tests failed takes that cause when every test file that failed is one of those;
+  otherwise the cause its log tells stands. Runs of perl itself never take it from that file.{{if $s.ForkLimitation}} <a href="index.html#known-limitations">The known
+  limitations</a>.{{end}}</li>
+  <li>Every distribution gets a cause; when nothing above applies, it is <em>not analysed</em>.</li>
+</ol>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>cause</th></tr></thead>
+  <tbody>
+  {{- range causes}}
+  <tr><td>{{causeTitle .}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+<p>On go-perl, C compile and link errors against the perl API and missing perl headers usually mean that a part of
+the perl API is missing from, or different in, the XS SDK native extensions are built against.</p>
+</section>
+
+<section id="comparison">
+<h2>The comparison</h2>
+<p>A distribution of the set can still fail in this environment on perl itself: a test that needs a service, a
+desktop or a file that is not there, a release that is broken in a way the CPAN Testers reports do not show.
+So the same distributions are run on perl {{$s.Snapshot.Perl}} itself, in the same images and harness, and each
+distribution falls into one of four buckets: both pass, only go-perl fails, both fail, only perl fails. A
+distribution a run has no record of counts as not passing there. What only go-perl fails is what go-perl has to
+fix; what both fail is down to the environment or the distribution.</p>
+<p>A blocked distribution names the distributions that blocked it; following those through the ones that are
+blocked themselves ends at distributions that were run and did not install. Those are listed by how many of the
+distributions only go-perl fails they block.</p>
+</section>
+
+{{- with $sub.Meta.Static}}
+<section id="static">
+<h2>Static builds</h2>
+<p>gperl builds a Perl program into one binary: <code>gperl build</code> embeds the program, the modules of its
+dependencies and the interpreter, and links the native (XS) modules of its dependencies into it with cgo. For every
+distribution whose tests passed on {{$sub.Label}}, the static build phase (<code>cpancompat static</code>) asks whether
+such a binary of a program that uses the distribution runs where there is nothing but the binary.</p>
+<ol>
+  <li><strong>The program</strong> loads the module the distribution is named after (<code>Foo::Bar</code> for
+  Foo-Bar), or all its modules when it has none of that name, and the package of each of its native modules that has
+  a <code>.pm</code>, so that the boot code of each runs. A module is loaded with <code>require</code> by its file name;
+  the program exits with a failure when one does not load.</li>
+  <li><strong>Its dependencies</strong> are pinned in a <code>cpanfile.snapshot</code>: the distribution and everything
+  it needs, the releases of the survey. What a distribution needs is the configure, build and runtime requirements of
+  the <code>MYMETA.json</code> its configure step wrote when gperl built it (its static metadata until then, and for a
+  distribution installed without a configure step); a program whose dependencies turn out to need more is built again
+  with them. Every distribution is built once, in gperl's module directory, and every program of the run uses it.
+  Distributions a program needs that did not pass themselves are built, not measured.</li>
+  <li><strong>The build</strong>: gperl {{.Gperl.Main.Version}}, installed with <code>go install {{.Gperl.Path}}@{{.Gperl.Main.Version}}</code>,
+  builds the distributions with gcc and links the program with <code>{{.BuildFlags}}</code>, on the Debian of the survey
+  with the same packages ({{.CC}}, {{.LibC}}, {{.Go}}).</li>
+  <li><strong>The binary</strong> must be fully static: it may name neither a program interpreter (<code>PT_INTERP</code>)
+  nor shared libraries (<code>DT_NEEDED</code>), as its ELF headers tell.</li>
+  <li><strong>It runs</strong> in an empty container. {{.Environment}} A binary that fails there is run again in the
+  build environment, which tells a binary that needs something of its environment from one that does not load.</li>
+</ol>
+<p>The libraries a program links, beyond the C runtime, are its <strong>external libraries</strong>: the libraries
+each native module's link named (gperl keeps its <code>-l</code> flags in the module's <code>.ldflags</code>) and the
+shared libraries its shared object names, except the C runtime: the libraries perl itself links and the C compiler's
+runtime ({{join .CRuntime ", "}}). A program whose external libraries all have static archives in the system (or in a
+distribution's tree, an Alien library) carries them; one that needs a library with no static archive cannot be
+linked statically. Why a build is not static is read from these files, not from what the logs say:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>static build</th><th>record</th></tr></thead>
+  <tbody>
+  {{- range staticCategories}}
+  <tr><td>{{.Title}}</td><td><code>{{.ID}}</code></td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+<p>Each distribution is measured with the dependencies of its own program: the result of a distribution includes
+whether what it needs builds statically. A program that uses several distributions is not measured as one; the
+cpanfile checker combines the results of each.</p>
+<p>{{num .Recorded}} distributions, {{dates .FirstResult .LastResult}}{{range .Invocations}}; {{.Jobs}} at a time,
+each build container with <code>--cpus {{.CPUs}} --memory {{.Memory}}</code>, on {{.Platform}}{{end}}.</p>
+</section>
+{{- end}}
+
+{{- if $s.Checker}}
+<section id="checker">
+<h2>The cpanfile checker</h2>
+<p><a href="check.html">The checker</a> reads a <code>cpanfile</code> (and a <code>cpanfile.snapshot</code>) in the
+browser, without sending it anywhere. It does not run the cpanfile as Perl: it reads the statements of its usual
+forms (<code>requires</code>, <code>on '…' =&gt; sub { … }</code>, <code>feature</code>, the phase-named forms such as
+<code>test_requires</code>) whose arguments are plain strings or numbers, and lists every line it could not read. As
+gperl does, it counts the <code>requires</code> of every phase but <code>develop</code>, and shows the others apart.
+Each requirement is met by the interpreter's own standard library, or else resolved to its distribution through the
+package index of the snapshot; a version range is compared with the version the index gives, as version.pm compares
+versions. A distribution is supported when it and everything it needs passed their tests on {{$sub.Label}}, and
+static when its static build is. A requirement the survey cannot answer (a module the index does not know, a
+distribution the survey did not run, a version outside the range) makes the verdict unknown.</p>
+</section>
+{{- end}}
+
+<section id="reproduce">
+<h2>Reproducing a survey</h2>
+<p>Surveys run on a machine of your own; the results in the repository are what this site is generated from.
+The repository's README has the details; in short:</p>
+<ol>
+  <li>Docker with 8 CPUs, 16 GB of memory and 60 GB of disk, in a virtual machine of its own (such as a colima
+  profile): the harness installs firewall rules in the Docker host, and CPAN code is untrusted.</li>
+  <li>A gperl binary for Linux on the architecture of the containers, built from go-perl.</li>
+  <li><code>make survey GPERL=path/to/gperl GPERL_COMMIT=…</code> fetches the snapshot and the CPAN Testers reports,
+  builds the dependency graph and both images, runs both interpreters on the reference set (several hours each),
+  and writes the results and this site.</li>
+</ol>
+</section>
+
+<section id="runs">
+<h2>The runs on this site</h2>
+{{- range $s.Runs}}
+<h3><code>{{.Name}}</code>: {{.Label}}{{with .Meta.Interpreter.Version}} {{.}}{{end}}{{if .Meta.Provisional}} <span class="muted">(provisional)</span>{{end}}</h3>
+{{- with .Meta.Note}}<p>{{.}}</p>{{end}}
+<dl class="facts">
+  {{- with .Meta.Interpreter.Commit}}<dt>built from</dt><dd><code>{{.}}</code></dd>{{end}}
+  <dt>image built on</dt><dd><code>{{.Meta.BaseImage}}</code></dd>
+  <dt>results</dt><dd>{{num .Meta.Recorded}} distributions, {{dates .Meta.FirstResult .Meta.LastResult}}</dd>
+  {{- if .Meta.ComparedWith}}<dt>compared with</dt><dd>run <code>{{.Meta.ComparedWith}}</code></dd>{{end}}
+</dl>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>started</th><th>image</th><th>harness</th><th>platform</th><th>jobs</th><th>each container</th><th>tests</th><th>ran again</th></tr></thead>
+  <tbody>
+  {{- range $inv := .Meta.Invocations}}
+  <tr><td>{{if $inv.Started}}{{date $inv.Started}}{{else}}<span class="muted">not recorded</span>{{end}}</td><td><code>{{$inv.Image}}</code></td>
+    <td><code>{{$inv.Harness.Module}}</code>{{with $inv.Harness.Revision}} <code title="{{.}}">{{short .}}</code>{{end}}{{if $inv.Harness.Modified}} (modified){{end}}</td>
+    <td>{{$inv.Platform}}</td><td>{{$inv.Jobs}}</td><td><code>--cpus {{$inv.CPUs}} --memory {{$inv.Memory}}</code>, {{duration $inv.WallSeconds}}</td>
+    <td>{{duration $inv.TestSeconds}}</td><td>{{join $inv.Redo ", "}}{{with $inv.Dists}} {{join . ", "}}{{end}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+{{- end}}
+</section>
+{{end}}

@@ -1,0 +1,50 @@
+# The environment of the static build phase (cpancompat static): the
+# survey's Debian with the same packages (their development files carry the
+# static archives of the C libraries), the Go toolchain gperl build runs,
+# and gperl, which builds distributions with gcc (CC) and links programs
+# with cgo, fully statically against glibc (GOFLAGS), as the survey's
+# unprivileged user. Distributions live in gperl's module directory, a
+# volume the run's containers share; Go keeps its caches below
+# /opt/go-cache, in the image the run makes from this one (static's cache
+# image).
+FROM debian:bookworm-slim
+
+COPY packages mysql.sh user.sh /opt/cpancompat/
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends $(sed 's/#.*//' /opt/cpancompat/packages) \
+ && rm -rf /var/lib/apt/lists/*
+RUN sh /opt/cpancompat/mysql.sh
+
+# The Go release `gperl install toolchain` pins, checked against the hash
+# gperl records for it (internal/gperl/install.go).
+ARG GO_ARCH
+RUN case "$GO_ARCH" in \
+      arm64) sum=ef758ae7c6cf9267c9c0ef080b8965f453d89ab2d25d9eb22de4405925238768 ;; \
+      amd64) sum=1153d3d50e0ac764b447adfe05c2bcf08e889d42a02e0fe0259bd47f6733ad7f ;; \
+      *) echo "no Go release pinned for $GO_ARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/go.tar.gz "https://go.dev/dl/go1.26.4.linux-$GO_ARCH.tar.gz" \
+ && echo "$sum  /tmp/go.tar.gz" | sha256sum -c - \
+ && tar -C /usr/local -xzf /tmp/go.tar.gz \
+ && rm /tmp/go.tar.gz
+
+# gperl, installed from its released module (cpancompat image -static
+# -gperl-version <version>) through the Go proxy, as a user installs it;
+# gperl.json is its build information.
+ARG GPERL_VERSION
+RUN test -n "$GPERL_VERSION" \
+ && mkdir -p /opt/gperl/bin \
+ && GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/opt/gperl/bin GOFLAGS=-modcacherw /usr/local/go/bin/go install github.com/goccy/go-perl/cmd/gperl@$GPERL_VERSION \
+ && rm -rf /tmp/gopath /root/.cache/go-build \
+ && /usr/local/go/bin/go version -m -json /opt/gperl/bin/gperl > /opt/cpancompat/gperl.json
+
+RUN sh /opt/cpancompat/user.sh \
+ && mkdir -p /opt/gperl/mod /opt/go-cache /bin-out /app \
+ && chown cpan:cpan /opt/gperl/mod /opt/go-cache /bin-out /app
+COPY static.sh load.pl /opt/cpancompat/
+
+ENV USER=cpan LOGNAME=cpan HOME=/home/cpan SHELL=/bin/bash LANG=C.UTF-8 \
+    PATH=/opt/gperl/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    GPERLMODCACHE=/opt/gperl/mod GOCACHE=/opt/go-cache/build GOMODCACHE=/opt/go-cache/mod GOTOOLCHAIN=local \
+    CC=gcc CGO_ENABLED=1 GOFLAGS=-ldflags=-extldflags=-static
+USER cpan
