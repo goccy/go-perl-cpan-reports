@@ -14,16 +14,21 @@ what fails in this environment anyway.
 
 ## Current results
 
-The results in `results/` are **provisional**: they were measured with gperl built from
-go-perl commit `84f3ee6`, on an unreleased development branch of go-perl. The results
-published in the end will be measured again with the released gperl.
+The results in `results/` are **provisional**. The go-perl results are not one run of
+one binary: `gperl-7647471-combined` gives each distribution its latest result from the
+development builds of go-perl measured from 2026-11-17 to 2026-11-19, on unreleased
+branches. 2,165 distributions were last measured with go-perl `7647471` or `49e6b7c`
+(which differs from it in one narrow fix), 7,952 come from the full survey of
+`ee7dd1b`, and the rest from a partial survey of `58ab759` and spot checks of other
+builds; the run's `meta.json` gives the breakdown. They will be replaced by one full
+survey of gperl once these changes are merged.
 
 | run | interpreter | passes, of 14,318 |
 |---|---|---|
-| `full7` | gperl, go-perl `84f3ee6` | 12,972 (90.6%) |
+| `gperl-7647471-combined` | gperl, development builds up to go-perl `7647471` | 13,487 (94.2%) |
 | `ref2` | perl 5.44.0 | 13,981 (97.6%) |
 
-go-perl passes 92.6% of what perl passes. Both runs: the CPAN snapshot of 2026-11-10,
+go-perl passes 96.3% of what perl passes. All runs: the CPAN snapshot of 2026-11-10,
 16 distributions at a time, each container with one CPU and 1500 MiB of memory, the
 test phase of a distribution limited to five minutes, on linux/arm64.
 
@@ -196,9 +201,9 @@ make survey GPERL=path/to/gperl GPERL_COMMIT=<the go-perl commit gperl was built
   in the logs name source files by them.
 
   The provisional results in this repository were made with gperl built from
-  unreleased go-perl development branches (commit `84f3ee6`, with an interpreter build
-  that is not published), which cannot be rebuilt from public sources. A survey of the
-  released gperl, or of any public go-perl commit, can be.
+  unreleased go-perl development branches (up to commit `7647471`, with interpreter
+  builds that are not published), which cannot be rebuilt from public sources. A survey
+  of the released gperl, or of any public go-perl commit, can be.
 
 - About 10 GB free on your machine for the data directories: the archives of the
   distributions (3.7 GB), the downloads, and the records and logs of both runs.
