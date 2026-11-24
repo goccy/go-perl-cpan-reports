@@ -37,9 +37,15 @@ EOF
 cc -O2 -o $G/bin/perl $G/perl.c
 rm $G/perl.c
 
-# The XS SDK (the headers native extensions compile against) is unpacked by
-# any `gperl xs build`; the distribution named here does not exist.
-$G/bin/gperl xs build -C $G/proj /nonexistent >/dev/null 2>&1 || true
+# The XS SDK (the headers native extensions compile against) is the copy
+# given to the image (cpancompat image -sdk), or else the one any
+# `gperl xs build` unpacks; the distribution named here does not exist.
+if [ -f $G/sdk/perl.h ]; then
+    mkdir -p $G/proj/local/xs
+    ln -s $G/sdk $G/proj/local/xs/.sdk
+else
+    $G/bin/gperl xs build -C $G/proj /nonexistent >/dev/null 2>&1 || true
+fi
 test -f $G/proj/local/xs/.sdk/perl.h
 ln -s $G/proj/local/xs/.sdk $G/fakearchlib/CORE
 

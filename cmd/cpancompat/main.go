@@ -65,7 +65,7 @@ func usage() {
   cpancompat testers [-data dir] -perl version
   cpancompat graph  [-data dir] [-perl version]
   cpancompat native [-data dir] [-top n]
-  cpancompat image  [-data dir] (-gperl binary | -perl-image image) [-image tag]
+  cpancompat image  [-data dir] (-gperl binary [-sdk dir] | -perl-image image) [-image tag]
   cpancompat run    [-data dir] -run name [-image tag] [-top n | -dists a,b,...]
                     [-jobs n] [-cpus n] [-memory size] [-wall duration]
                     [-test-limit duration] [-interpreter label] [-redo outcome,...]
@@ -89,6 +89,7 @@ func main() {
 	data := fs.String("data", os.Getenv("CPANCOMPAT_DATA"), "data directory")
 	top := fs.Int("top", 0, "native, run: only the n most depended-upon distributions (native: default 1000; run: default all)")
 	gperl := fs.String("gperl", "", "image: the gperl binary, built for linux")
+	sdk := fs.String("sdk", "", "image: the XS SDK headers of that gperl (xs/sdk/include of its source), for a gperl without `gperl xs build`")
 	perl := fs.String("perl", "", "testers, graph: the perl version the interpreter is built from, as CPAN Testers names it (e.g. 5.44.0)")
 	perlImage := fs.String("perl-image", "", "image: build the reference image around this official perl image instead of gperl")
 	image := fs.String("image", "cpancompat:latest", "image, run: the container image tag")
@@ -133,7 +134,7 @@ func main() {
 		}
 		err = scanNative(*data, *top)
 	case "image":
-		err = buildImage(*data, *gperl, *perlImage, *image)
+		err = buildImage(*data, *gperl, *sdk, *perlImage, *image)
 	case "run":
 		if *run == "" {
 			usage()

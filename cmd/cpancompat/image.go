@@ -19,8 +19,9 @@ var imageFiles embed.FS
 // the given gperl binary (built for the architecture and operating system
 // of the containers, i.e. linux) or, for the reference image, the given
 // official perl image (Dockerfile.reference): the same environment with
-// perl itself as the perl command.
-func buildImage(dataDir, gperl, perlImage, tag string) error {
+// perl itself as the perl command. sdk, when given, is the directory of
+// the XS SDK headers of a gperl that has no `gperl xs build` to unpack them.
+func buildImage(dataDir, gperl, sdk, perlImage, tag string) error {
 	if (gperl == "") == (perlImage == "") {
 		return fmt.Errorf("image: give either a gperl binary (-gperl) or a perl image (-perl-image)")
 	}
@@ -40,6 +41,12 @@ func buildImage(dataDir, gperl, perlImage, tag string) error {
 	if perlImage != "" {
 		args = append(args, "-f", filepath.Join(ctx, "Dockerfile.reference"), "--build-arg", "PERL_IMAGE="+perlImage)
 	} else if err := copyFile(gperl, filepath.Join(ctx, "gperl"), 0o755); err != nil {
+		return err
+	} else if sdk == "" {
+		if err := os.Mkdir(filepath.Join(ctx, "sdk"), 0o755); err != nil {
+			return err
+		}
+	} else if err := os.CopyFS(filepath.Join(ctx, "sdk"), os.DirFS(sdk)); err != nil {
 		return err
 	}
 	cmd := exec.Command("docker", append(args, ctx)...)

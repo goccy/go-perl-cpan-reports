@@ -13,6 +13,7 @@ RUN apt-get update \
 RUN sh /opt/cpancompat/mysql.sh
 
 COPY gperl /opt/gperl/bin/gperl
+COPY sdk /opt/gperl/sdk
 RUN sh /opt/cpancompat/user.sh
 COPY setup.sh dist.sh watch.sh builder.pl unmet.pl /opt/cpancompat/
 COPY Harness.pm /opt/cpancompat/lib/CPANCompat/Harness.pm
