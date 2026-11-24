@@ -16,13 +16,16 @@ phases, failing tests, evidence and log.</p>
   <label>On {{.Label}} <select name="reference"><option value="">all</option></select></label>
   {{- end}}
   <label>Cause <select name="cause"><option value="">all</option></select></label>
+  {{- if $s.Subject.StaticCounts}}
+  <label>Static build <select name="static"><option value="">all</option></select></label>
+  {{- end}}
   <label>Order <select name="order"><option value="dependents">most dependents first</option><option value="name">by name</option></select></label>
 </form>
 <p class="count" id="count" aria-live="polite">Loading…</p>
 <noscript><p>The table needs JavaScript. The data is in <a href="dists.json">dists.json</a>.</p></noscript>
 <div class="table-wrap">
 <table class="dists" id="dists">
-  <thead><tr><th>distribution</th><th>release</th><th>{{$s.Subject.Label}}</th>{{with $s.Reference}}<th>{{.Label}}</th>{{end}}<th>cause on {{$s.Subject.Label}}</th><th class="num">dependents</th></tr></thead>
+  <thead><tr><th>distribution</th><th>release</th><th>{{$s.Subject.Label}}</th>{{with $s.Reference}}<th>{{.Label}}</th>{{end}}<th>cause on {{$s.Subject.Label}}</th>{{if $s.Subject.StaticCounts}}<th>static build</th>{{end}}<th class="num">dependents</th></tr></thead>
   <tbody></tbody>
 </table>
 </div>

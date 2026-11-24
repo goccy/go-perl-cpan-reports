@@ -464,9 +464,28 @@ func buildGraph(dataDir, perl string) error {
 }
 
 // readPackages parses the CPAN package index into module -> archive path.
-// The format is PAUSE's: mail-style header lines, a blank line, then one
-// "module version path" row per indexed module.
 func readPackages(path string) (map[string]string, error) {
+	index, err := readPackageIndex(path)
+	if err != nil {
+		return nil, err
+	}
+	modules := make(map[string]string, len(index))
+	for module, e := range index {
+		modules[module] = e.path
+	}
+	return modules, nil
+}
+
+// packageEntry is one row of the CPAN package index: the module's version
+// ("undef" when it declares none) and its archive's path below authors/id/.
+type packageEntry struct {
+	version, path string
+}
+
+// readPackageIndex parses the CPAN package index. The format is PAUSE's:
+// mail-style header lines, a blank line, then one "module version path" row
+// per indexed module.
+func readPackageIndex(path string) (map[string]packageEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -476,7 +495,7 @@ func readPackages(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	modules := map[string]string{}
+	modules := map[string]packageEntry{}
 	sc := bufio.NewScanner(zr)
 	inBody := false
 	for line := 1; sc.Scan(); line++ {
@@ -488,7 +507,7 @@ func readPackages(path string) (map[string]string, error) {
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("%s: line %d: want 3 columns, got %d", path, line, len(fields))
 		}
-		modules[fields[0]] = fields[2]
+		modules[fields[0]] = packageEntry{version: fields[1], path: fields[2]}
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err

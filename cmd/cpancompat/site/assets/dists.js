@@ -38,6 +38,12 @@
         option(field("bucket"), String(i), b.title);
       });
     }
+    if (field("static")) {
+      data.static.forEach(function (c, i) {
+        option(field("static"), String(i), c.title);
+      });
+      option(field("static"), "none", "not measured");
+    }
   }
 
   // The filters are kept in the address's fragment, by the names of their
@@ -54,9 +60,13 @@
       if (v === null || !field(pair[0])) return;
       field(pair[0]).value = v === "none" ? "none" : String(pair[1].indexOf(v));
     });
-    [["cause", data.causes], ["bucket", data.buckets]].forEach(function (pair) {
+    [["cause", data.causes], ["bucket", data.buckets], ["static", data.static]].forEach(function (pair) {
       var v = params.get(pair[0]);
       if (v === null || !field(pair[0])) return;
+      if (v === "none" && pair[0] === "static") {
+        field(pair[0]).value = "none";
+        return;
+      }
       var i = pair[1].findIndex(function (x) { return x.id === v; });
       field(pair[0]).value = i < 0 ? "" : String(i);
     });
@@ -73,6 +83,9 @@
     });
     if (field("cause").value !== "") params.set("cause", data.causes[Number(field("cause").value)].id);
     if (field("bucket") && field("bucket").value !== "") params.set("bucket", data.buckets[Number(field("bucket").value)].id);
+    if (field("static") && field("static").value !== "") {
+      params.set("static", field("static").value === "none" ? "none" : data.static[Number(field("static").value)].id);
+    }
     if (field("order").value === "name") params.set("order", "name");
     var s = params.toString();
     history.replaceState(null, "", s ? "#" + s : location.pathname + location.search);
@@ -90,12 +103,14 @@
     var reference = selected("reference");
     var cause = selected("cause");
     var bucket = selected("bucket");
+    var stat = selected("static");
     matches = data.rows.filter(function (r) {
       if (q && r[0].toLowerCase().indexOf(q) < 0) return false;
       if (subject !== null && r[3] !== subject) return false;
       if (reference !== null && r[4] !== reference) return false;
       if (cause !== null && r[5] !== cause) return false;
       if (bucket !== null && r[6] !== bucket) return false;
+      if (stat !== null && r[8] !== stat) return false;
       return true;
     });
     if (field("order").value === "name") {
@@ -137,6 +152,7 @@
       outcomeCell(tr, r[3]);
       if (field("reference")) outcomeCell(tr, r[4]);
       cell(tr, r[5] < 0 ? "" : data.causes[r[5]].title);
+      if (field("static")) cell(tr, r[8] < 0 ? "" : data.static[r[8]].title);
       cell(tr, r[2].toLocaleString("en-US"), "num");
       frag.appendChild(tr);
     }

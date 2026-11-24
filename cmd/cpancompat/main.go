@@ -29,6 +29,11 @@
 //	                   writable directory of this machine, kept from the
 //	                   LAN and the hosts around them, and without network
 //	                   while they test
+//	cpancompat static  for every distribution that passed in a run, build a
+//	                   program that loads it into a fully static binary
+//	                   with gperl and run the binary in a container that
+//	                   holds nothing else (image -static makes the image);
+//	                   results accumulate in runs/<name>/static.jsonl
 //	cpancompat report  summarize a run: outcomes, coverage against the
 //	                   distributions that pass on perl, why each
 //	                   distribution that did not pass failed
@@ -66,9 +71,12 @@ func usage() {
   cpancompat graph  [-data dir] [-perl version]
   cpancompat native [-data dir] [-top n]
   cpancompat image  [-data dir] (-gperl binary [-sdk dir] | -perl-image image) [-image tag]
+  cpancompat image  [-data dir] -static -gperl binary [-dev-replace version] [-image tag]
   cpancompat run    [-data dir] -run name [-image tag] [-top n | -dists a,b,...]
                     [-jobs n] [-cpus n] [-memory size] [-wall duration]
                     [-test-limit duration] [-interpreter label] [-redo outcome,...]
+  cpancompat static [-data dir] -run name [-image tag] [-top n | -dists a,b,...]
+                    [-jobs n] [-cpus n] [-memory size] [-wall duration] [-redo state,...]
   cpancompat report [-data dir] -run name [-interpreter-name name]
                     [-reference-data dir -reference-run name]
   cpancompat refset [-data dir] -results dir
@@ -87,21 +95,23 @@ func main() {
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	data := fs.String("data", os.Getenv("CPANCOMPAT_DATA"), "data directory")
-	top := fs.Int("top", 0, "native, run: only the n most depended-upon distributions (native: default 1000; run: default all)")
+	top := fs.Int("top", 0, "native, run, static: only the n most depended-upon distributions (native: default 1000; run, static: default all)")
 	gperl := fs.String("gperl", "", "image: the gperl binary, built for linux")
 	sdk := fs.String("sdk", "", "image: the XS SDK headers of that gperl (xs/sdk/include of its source), for a gperl without `gperl xs build`")
 	perl := fs.String("perl", "", "testers, graph: the perl version the interpreter is built from, as CPAN Testers names it (e.g. 5.44.0)")
 	perlImage := fs.String("perl-image", "", "image: build the reference image around this official perl image instead of gperl")
-	image := fs.String("image", "cpancompat:latest", "image, run: the container image tag")
-	run := fs.String("run", "", "run, report: the name of the run")
-	only := fs.String("dists", "", "run: only these distributions (comma separated), with what they need")
-	jobs := fs.Int("jobs", 2, "run: how many distributions to run at once")
-	cpus := fs.String("cpus", "2", "run: CPUs of each container")
-	memory := fs.String("memory", "2g", "run: memory of each container")
-	wall := fs.Duration("wall", 2*time.Hour, "run: how long one container may run")
+	static := fs.Bool("static", false, "image: build the image of the static build phase around gperl instead")
+	devReplace := fs.String("dev-replace", "", "image -static: the released go-perl version whose source the builds use (GPERL_DEV_REPLACE), for a gperl whose `gperl build` cannot resolve go-perl itself")
+	image := fs.String("image", "cpancompat:latest", "image, run, static: the container image tag")
+	run := fs.String("run", "", "run, static, report: the name of the run")
+	only := fs.String("dists", "", "run, static: only these distributions (comma separated), with what they need")
+	jobs := fs.Int("jobs", 2, "run, static: how many distributions to run at once")
+	cpus := fs.String("cpus", "2", "run, static: CPUs of each container (static: of each build container)")
+	memory := fs.String("memory", "2g", "run, static: memory of each container (static: of each build container)")
+	wall := fs.Duration("wall", 2*time.Hour, "run: how long one container may run; static: how long one phase of a build container may run")
 	testLimit := fs.Duration("test-limit", 20*time.Minute, "run: how long the test phase of one distribution may run (whole seconds)")
 	interpreter := fs.String("interpreter", "", "run: a label for the interpreter build, kept in every result")
-	redo := fs.String("redo", "", "run: outcomes to run again (comma separated) instead of keeping their recorded result")
+	redo := fs.String("redo", "", "run: outcomes, static: states or reasons to run again (comma separated) instead of keeping their recorded result")
 	referenceData := fs.String("reference-data", "", "report: the data directory of a run of perl itself to compare with")
 	referenceRunName := fs.String("reference-run", "", "report: the name of that run")
 	results := fs.String("results", "", "refset, export, site: the results directory the repository keeps")
@@ -134,7 +144,11 @@ func main() {
 		}
 		err = scanNative(*data, *top)
 	case "image":
-		err = buildImage(*data, *gperl, *sdk, *perlImage, *image)
+		if *static {
+			err = buildStaticImage(*data, *gperl, *devReplace, *image)
+		} else {
+			err = buildImage(*data, *gperl, *sdk, *perlImage, *image)
+		}
 	case "run":
 		if *run == "" {
 			usage()
@@ -153,6 +167,23 @@ func main() {
 			}
 		}
 		err = runSurvey(opts)
+	case "static":
+		if *run == "" {
+			usage()
+		}
+		opts := staticOptions{
+			dataDir: *data, run: *run, image: *image, top: *top, jobs: *jobs,
+			cpus: *cpus, memory: *memory, wall: *wall, redo: map[string]bool{},
+		}
+		if *only != "" {
+			opts.only = strings.Split(*only, ",")
+		}
+		if *redo != "" {
+			for _, v := range strings.Split(*redo, ",") {
+				opts.redo[v] = true
+			}
+		}
+		err = runStatic(opts)
 	case "report":
 		if *run == "" {
 			usage()

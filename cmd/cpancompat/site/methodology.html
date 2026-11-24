@@ -11,6 +11,12 @@ the cause of a failure are decided, and how to make a survey yourself. Everythin
   <a href="#outcomes">Outcomes</a>
   <a href="#causes">Causes</a>
   <a href="#comparison">The comparison</a>
+  {{- if $sub.Meta.Static}}
+  <a href="#static">Static builds</a>
+  {{- end}}
+  {{- if $s.Checker}}
+  <a href="#checker">The cpanfile checker</a>
+  {{- end}}
   <a href="#reproduce">Reproducing a survey</a>
   <a href="#runs">The runs on this site</a>
 </nav>
@@ -140,6 +146,74 @@ fix; what both fail is down to the environment or the distribution.</p>
 blocked themselves ends at distributions that were run and did not install. Those are listed by how many of the
 distributions only go-perl fails they block.</p>
 </section>
+
+{{- with $sub.Meta.Static}}
+<section id="static">
+<h2>Static builds</h2>
+<p>gperl builds a Perl program into one binary: <code>gperl build</code> embeds the program, the modules of its
+dependencies and the interpreter, and links the native (XS) modules of its dependencies into it with cgo. For every
+distribution whose tests passed on {{$sub.Label}}, the static build phase (<code>cpancompat static</code>) asks whether
+such a binary of a program that uses the distribution runs where there is nothing but the binary.</p>
+<ol>
+  <li><strong>The program</strong> loads the module the distribution is named after (<code>Foo::Bar</code> for
+  Foo-Bar), or all its modules when it has none of that name, and the package of each of its native modules that has
+  a <code>.pm</code>, so that the boot code of each runs. A module is loaded with <code>require</code> by its file name;
+  the program exits with a failure when one does not load.</li>
+  <li><strong>Its dependencies</strong> are pinned in a <code>cpanfile.snapshot</code>: the distribution and everything
+  it needs, the releases of the survey. What a distribution needs is the configure, build and runtime requirements of
+  the <code>MYMETA.json</code> its configure step wrote when gperl built it (its static metadata until then, and for a
+  distribution installed without a configure step); a program whose dependencies turn out to need more is built again
+  with them. Every distribution is built once, in gperl's module directory, and every program of the run uses it.
+  Distributions a program needs that did not pass themselves are built, not measured.</li>
+  <li><strong>The build</strong>: gperl {{.Gperl.Version}}{{with .Gperl.Revision}} (<code title="{{.}}">{{short .}}</code>){{end}}
+  builds the distributions with gcc and links the program with <code>{{.BuildFlags}}</code>, on the Debian of the survey
+  with the same packages ({{.CC}}, {{.LibC}}, {{.Go}}).
+  {{- with .Gperl.DevReplace}} Its builds use the source of go-perl {{.}} as the Go proxy serves it, given to gperl
+  through <code>GPERL_DEV_REPLACE</code>.{{end}}</li>
+  <li><strong>The binary</strong> must be fully static: it may name neither a program interpreter (<code>PT_INTERP</code>)
+  nor shared libraries (<code>DT_NEEDED</code>), as its ELF headers tell.</li>
+  <li><strong>It runs</strong> in an empty container. {{.Environment}} A binary that fails there is run again in the
+  build environment, which tells a binary that needs something of its environment from one that does not load.</li>
+</ol>
+<p>The libraries a program links, beyond the C runtime, are its <strong>external libraries</strong>: the libraries
+each native module's link named (gperl keeps its <code>-l</code> flags in the module's <code>.ldflags</code>) and the
+shared libraries its shared object names, except the C runtime: the libraries perl itself links and the C compiler's
+runtime ({{join .CRuntime ", "}}). A program whose external libraries all have static archives in the system (or in a
+distribution's tree, an Alien library) carries them; one that needs a library with no static archive cannot be
+linked statically. Why a build is not static is read from these files, not from what the logs say:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>static build</th><th>record</th></tr></thead>
+  <tbody>
+  {{- range staticCategories}}
+  <tr><td>{{.Title}}</td><td><code>{{.ID}}</code></td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+<p>Each distribution is measured with the dependencies of its own program: the result of a distribution includes
+whether what it needs builds statically. A program that uses several distributions is not measured as one; the
+cpanfile checker combines the results of each.</p>
+<p>{{num .Recorded}} distributions, {{dates .FirstResult .LastResult}}{{range .Invocations}}; {{.Jobs}} at a time,
+each build container with <code>--cpus {{.CPUs}} --memory {{.Memory}}</code>, on {{.Platform}}{{end}}.</p>
+</section>
+{{- end}}
+
+{{- if $s.Checker}}
+<section id="checker">
+<h2>The cpanfile checker</h2>
+<p><a href="check.html">The checker</a> reads a <code>cpanfile</code> (and a <code>cpanfile.snapshot</code>) in the
+browser, without sending it anywhere. It does not run the cpanfile as Perl: it reads the statements of its usual
+forms (<code>requires</code>, <code>on '…' =&gt; sub { … }</code>, <code>feature</code>, the phase-named forms such as
+<code>test_requires</code>) whose arguments are plain strings or numbers, and lists every line it could not read. As
+gperl does, it counts the <code>requires</code> of every phase but <code>develop</code>, and shows the others apart.
+Each requirement is met by the interpreter's own standard library, or else resolved to its distribution through the
+package index of the snapshot; a version range is compared with the version the index gives, as version.pm compares
+versions. A distribution is supported when it and everything it needs passed their tests on {{$sub.Label}}, and
+static when its static build is. A requirement the survey cannot answer (a module the index does not know, a
+distribution the survey did not run, a version outside the range) makes the verdict unknown.</p>
+</section>
+{{- end}}
 
 <section id="reproduce">
 <h2>Reproducing a survey</h2>

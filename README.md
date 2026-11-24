@@ -56,6 +56,7 @@ directory, so every step can be run again on its own:
 | `graph` | joins them into one record per distribution and derives the dependency graph |
 | `image` | builds the image distributions are tested in, around gperl or an official perl image |
 | `run` | configures, builds, tests and installs the distributions, one container each, in dependency order |
+| `static` | for each distribution that passed in a run, builds a program that loads it into a fully static binary with gperl, and runs the binary in a container that holds nothing else (`image -static` makes its image) |
 | `report` | why each distribution that did not pass failed, and how a run compares with a run of perl |
 | `refset`, `export` | write the snapshot, the reference set and a run into `results/` |
 | `site` | generates the site from `results/` |
@@ -68,14 +69,26 @@ directory, so every step can be run again on its own:
 results/snapshot.json           the CPAN snapshot and the size of the reference set
 results/reference.jsonl.gz      the reference set: distribution, release, CPAN Testers
                                 Linux pass and fail counts on perl 5.44.0, dependents
+results/packages.jsonl.gz       every distribution of the snapshot: its modules and their
+                                versions in the package index, and the distributions its
+                                configure, build and runtime requirements name
 results/<run>/meta.json         the interpreter and its commit, whether the run is
                                 provisional, the image, the dates, and the limits and
-                                harness of each invocation of `run`; the network policy
+                                harness of each invocation of `run`; the network policy;
+                                how the static build phase was made, when there was one
 results/<run>/results.jsonl.gz  the result of each distribution: outcome, phases, test files
 results/<run>/failures.jsonl.gz why each distribution that did not pass failed: failing
                                 phase and test files, evidence lines, cause, blockers
 results/<run>/logs.jsonl.gz     the end of the failing phase's log of each of them
+results/<run>/provided.json     the modules the interpreter ships, with their versions
+results/<run>/static.jsonl.gz   the static build of each distribution that passed: state,
+                                reason, the libraries of the system it links, its binary
+results/<run>/static-logs.jsonl.gz
+                                the end of the log of each static build that failed
 ```
+
+The site's cpanfile checker (`check.html`) reads `check.json`, which `site` makes from
+`packages.jsonl.gz` and the subject run's results, static builds and `provided.json`.
 
 The files are gzip-compressed JSON lines. The records hold no path of the machine a
 run was made on: `export` replaces the data directory's path and cuts paths below the

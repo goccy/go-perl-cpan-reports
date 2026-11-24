@@ -100,6 +100,49 @@
 {{- with .Result}}{{if and (eq .Outcome "pass") .Tests}}
 <p class="muted">{{len .Tests}} test files ran.</p>
 {{- end}}{{end}}
+
+{{- with .Static}}
+<h3 id="static">Static build</h3>
+<p class="verdict"><span class="outcome s-{{.Rec.State}}">{{.Category.Title}}</span>
+  {{- if .Libraries}}: {{range $i, $l := .Libraries}}{{if $i}}, {{end}}<code>lib{{$l}}</code>{{end}}{{end}}.
+  <span class="muted">{{.Rec.Release}}{{if gt .Rec.Attempts 1}}, {{.Rec.Attempts}} attempts{{end}}, {{duration .Rec.Seconds}}, finished {{date .Rec.Finished}}</span></p>
+<dl class="facts">
+  {{- if .Rec.BlockedBy}}
+  <dt>blocked by</dt><dd>{{range $i, $d := .Rec.BlockedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}#static">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
+  {{- end}}
+  {{- if .Rec.CausedBy}}
+  <dt>found in</dt><dd>the native modules of {{range $i, $d := .Rec.CausedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}#static">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
+  {{- end}}
+  {{- if .Rec.Loaded}}
+  <dt>loads</dt><dd>{{range $i, $m := .Rec.Loaded}}{{if $i}}, {{end}}<code>{{$m}}</code>{{end}}</dd>
+  {{- end}}
+  {{- if .Rec.Closure}}
+  <dt>carries</dt><dd>{{num (len .Rec.Closure)}} distributions{{with .Rec.NativeModules}}, {{num (len .)}} native modules{{end}}</dd>
+  {{- end}}
+  {{- with .Rec.Binary}}
+  <dt>binary</dt><dd>{{num .Bytes}} bytes{{with .Interp}}; program interpreter <code>{{.}}</code>{{end}}{{if .Needed}}; shared libraries {{range $i, $n := .Needed}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}{{end}}</dd>
+  {{- end}}
+</dl>
+{{- if .Rec.ExternalLibs}}
+<div class="table-wrap"><table>
+  <thead><tr><th>library</th><th>linked by</th><th>static archive</th></tr></thead>
+  <tbody>{{range .Rec.ExternalLibs}}<tr><td><code>lib{{.Name}}</code></td><td>{{$d := .Dist}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}</td><td>{{if .StaticArchive}}{{if eq .From "module_directory"}}from a distribution's tree (an Alien library){{else}}from the system{{end}}{{else}}none{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+{{- end}}
+{{- if .Rec.Phases}}
+<ol class="phases" aria-label="phases of the static build">
+  {{- range .Rec.Phases}}
+  <li class="{{if or .TimedOut (ne .Status 0)}}bad{{end}}">{{.Phase}} <span class="muted">{{duration .Seconds}}{{if ne .Status 0}}, status {{.Status}}{{end}}{{if .TimedOut}}, out of time{{end}}</span></li>
+  {{- end}}
+</ol>
+{{- end}}
+{{- with .Log}}
+<h4>End of {{.Log}} <span class="muted">{{num .Bytes}} bytes in all</span></h4>
+<pre class="log">{{.Text}}</pre>
+{{- end}}
+<p class="muted">A program that loads its modules, built by gperl into one binary with everything it needs, linked fully
+statically, and run where there is nothing but the binary. <a href="../methodology.html#static">How it is measured</a>.</p>
+{{- end}}
 </section>
 {{- end}}
 {{end}}

@@ -39,6 +39,17 @@ CPUS       ?= 1
 MEMORY     ?= 1500m
 TEST_LIMIT ?= 300s
 
+# The static build phase: its image, how many build containers run at once,
+# the CPUs and memory of each, and how long one of their phases may run.
+# DEV_REPLACE is the go-perl version whose source the builds use, for a
+# gperl whose `gperl build` cannot resolve go-perl itself.
+STATIC_IMAGE  ?= cpancompat-static:$(RUN)
+STATIC_JOBS   ?= 4
+STATIC_CPUS   ?= 2
+STATIC_MEMORY ?= 4g
+STATIC_WALL   ?= 1h
+DEV_REPLACE   ?=
+
 # Where the results the repository keeps and the site go. With
 # PROVISIONAL=1, the runs are exported as provisional, with NOTE saying
 # what they are.
@@ -52,10 +63,10 @@ CPANCOMPAT := $(CURDIR)/bin/cpancompat
 SHARED     := 02packages.details.txt.gz releases.jsonl releases-indexed-only.jsonl snapshot.json testers-perl-$(PERL_VERSION).jsonl
 EXPORT_FLAGS = $(if $(PROVISIONAL),-provisional -note '$(NOTE)')
 
-.PHONY: survey snapshot images provided graph run run-gperl run-perl report export site serve test \
+.PHONY: survey snapshot images provided graph run run-gperl run-perl static report export site serve test \
 	require-gperl require-commit $(CPANCOMPAT)
 
-survey: snapshot images provided graph run report export site
+survey: snapshot images provided graph run static report export site
 
 # go build in the checkout records the revision, which run keeps with
 # the settings of each invocation.
@@ -79,6 +90,7 @@ snapshot: $(CPANCOMPAT)
 images: $(CPANCOMPAT) require-gperl require-commit
 	$(CPANCOMPAT) image -data $(DATA) -gperl $(GPERL) -image $(IMAGE)
 	$(CPANCOMPAT) image -data $(REF_DATA) -perl-image $(PERL_IMAGE) -image $(REF_IMAGE)
+	$(CPANCOMPAT) image -data $(DATA) -static -gperl $(GPERL) $(if $(DEV_REPLACE),-dev-replace $(DEV_REPLACE)) -image $(STATIC_IMAGE)
 
 # The modules each interpreter ships, listed by provided.pl run in its own
 # survey image (no network, no capabilities); the graph needs them.
@@ -105,6 +117,11 @@ run-perl: $(CPANCOMPAT)
 run-gperl: $(CPANCOMPAT) require-commit
 	$(CPANCOMPAT) run -data $(DATA) -run $(RUN) -image $(IMAGE) -interpreter go-perl@$(GPERL_SHORT) \
 		-jobs $(JOBS) -cpus $(CPUS) -memory $(MEMORY) -test-limit $(TEST_LIMIT)
+
+# The static builds of what passed on gperl.
+static: $(CPANCOMPAT) require-commit
+	$(CPANCOMPAT) static -data $(DATA) -run $(RUN) -image $(STATIC_IMAGE) \
+		-jobs $(STATIC_JOBS) -cpus $(STATIC_CPUS) -memory $(STATIC_MEMORY) -wall $(STATIC_WALL)
 
 # Text reports, failures.jsonl and failures.md in each run's directory. The
 # interpreter names decide where the known causes (known-causes.json) apply:

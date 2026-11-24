@@ -93,6 +93,9 @@ type runMeta struct {
 	// that made the run.
 	Invocations []invocation `json:"invocations"`
 	Network     string       `json:"network"`
+	// Static is how the run's static build phase was made; nil when the
+	// run has none.
+	Static *staticMeta `json:"static,omitempty"`
 }
 
 // logExcerpt is the end of the log of a distribution's failing phase.
@@ -153,6 +156,13 @@ func exportReferenceSet(dataDir, results string) error {
 		return err
 	}
 	if err := writeGzipJSONLines(filepath.Join(results, referenceSetFile), referenceSet(dists)); err != nil {
+		return err
+	}
+	packages, err := packageIndexOf(dataDir, dists)
+	if err != nil {
+		return err
+	}
+	if err := writeGzipJSONLines(filepath.Join(results, packagesGzFile), packages); err != nil {
 		return err
 	}
 	return writeJSON(filepath.Join(results, publishedSnapshotFile), ps)
@@ -260,6 +270,16 @@ func exportRun(opts exportOptions) error {
 		return err
 	}
 	if err := writeGzipJSONLines(filepath.Join(dir, logsGzFile), logs); err != nil {
+		return err
+	}
+	provided, err := os.ReadFile(filepath.Join(opts.dataDir, providedFile))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, providedFile), provided, 0o644); err != nil {
+		return err
+	}
+	if meta.Static, err = exportStatic(opts.dataDir, opts.run, dir, red); err != nil {
 		return err
 	}
 	return writeJSON(filepath.Join(dir, metaFile), meta)
@@ -535,6 +555,12 @@ type publishedRun struct {
 	meta runMeta
 	data *runData
 	logs map[string]*logExcerpt
+	// static and staticLogs are its static build records and log ends
+	// (empty when it has none); provided is what its interpreter ships
+	// (nil when the run was exported without it).
+	static     map[string]*staticRecord
+	staticLogs map[string]*logExcerpt
+	provided   map[string]string
 }
 
 // published is a results directory, read.
@@ -542,6 +568,9 @@ type published struct {
 	snapshot publishedSnapshot
 	set      []refDist
 	runs     map[string]*publishedRun
+	// packages is the snapshot's package index (nil when the directory
+	// was written without it).
+	packages []packageDist
 }
 
 // readPublished reads a results directory: its snapshot, its reference set
@@ -558,6 +587,9 @@ func readPublished(results string) (*published, error) {
 		return nil, err
 	}
 	if p.set, err = readGzipJSONLines[refDist](filepath.Join(results, referenceSetFile)); err != nil {
+		return nil, err
+	}
+	if p.packages, err = readGzipJSONLines[packageDist](filepath.Join(results, packagesGzFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	entries, err := os.ReadDir(results)
@@ -606,6 +638,16 @@ func readPublished(results string) (*published, error) {
 		pr.data.applyKnownCauses(known, pr.meta.Interpreter.Name)
 		for i := range logs {
 			pr.logs[logs[i].Dist] = &logs[i]
+		}
+		if pr.static, pr.staticLogs, err = readPublishedStatic(dir); err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(filepath.Join(dir, providedFile)); err == nil {
+			if pr.provided, err = readProvided(filepath.Join(dir, providedFile)); err != nil {
+				return nil, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
 		}
 		p.runs[e.Name()] = pr
 	}

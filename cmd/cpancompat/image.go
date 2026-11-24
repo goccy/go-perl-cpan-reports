@@ -1,12 +1,16 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"debug/buildinfo"
 	"embed"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // imageFiles is the build context of the container image every
@@ -53,6 +57,75 @@ func buildImage(dataDir, gperl, sdk, perlImage, tag string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// gperlBuild identifies the gperl of the static build image, by the build
+// information of its binary (gperl.json in the image).
+type gperlBuild struct {
+	Module   string `json:"module"`
+	Version  string `json:"version"`
+	Revision string `json:"revision,omitempty"`
+	Modified bool   `json:"modified,omitempty"`
+	// DevReplace is the released go-perl version whose source its builds
+	// use (GPERL_DEV_REPLACE), "" when they resolve go-perl themselves.
+	DevReplace string `json:"dev_replace,omitempty"`
+}
+
+// buildStaticImage builds the image of the static build phase
+// (Dockerfile.static) around the given gperl binary, built for linux, and
+// the image without a single file the binaries are run in (emptyImage).
+// devReplace, when given, is the released go-perl version whose source the
+// image's builds use, for a gperl whose `gperl build` cannot resolve
+// go-perl itself.
+func buildStaticImage(dataDir, gperl, devReplace, tag string) error {
+	if gperl == "" {
+		return fmt.Errorf("image -static: give the gperl binary (-gperl)")
+	}
+	info, err := buildinfo.ReadFile(gperl)
+	if err != nil {
+		return fmt.Errorf("image -static: %w", err)
+	}
+	b := gperlBuild{Module: info.Main.Path, Version: info.Main.Version, DevReplace: devReplace}
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			b.Revision = s.Value
+		case "vcs.modified":
+			b.Modified = s.Value == "true"
+		}
+	}
+	ctx := filepath.Join(dataDir, "static-image-context")
+	if err := writeContext(ctx, "Dockerfile.static", "packages", "mysql.sh", "user.sh", "static.sh", "load.pl"); err != nil {
+		return err
+	}
+	if err := writeJSON(filepath.Join(ctx, "gperl.json"), b); err != nil {
+		return err
+	}
+	if err := copyFile(gperl, filepath.Join(ctx, "gperl"), 0o755); err != nil {
+		return err
+	}
+	arch, err := exec.Command("docker", "version", "--format", "{{.Server.Arch}}").Output()
+	if err != nil {
+		return fmt.Errorf("docker version: %w", err)
+	}
+	cmd := exec.Command("docker", "build", "-t", tag, "-f", filepath.Join(ctx, "Dockerfile.static"),
+		"--build-arg", "GO_ARCH="+strings.TrimSpace(string(arch)), "--build-arg", "DEV_REPLACE="+devReplace, ctx)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	// An image from an empty archive: no file at all.
+	var empty bytes.Buffer
+	if err := tar.NewWriter(&empty).Close(); err != nil {
+		return err
+	}
+	imp := exec.Command("docker", "import", "-", emptyImage)
+	imp.Stdin = &empty
+	if out, err := imp.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker import: %v: %s", err, out)
+	}
+	return nil
 }
 
 // writeContext makes dir a build context holding the named files of the

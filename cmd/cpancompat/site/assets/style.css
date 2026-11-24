@@ -157,7 +157,17 @@ button { cursor: pointer; }
 .o-pass { color: var(--good); }
 .o-fail, .o-build_failed, .o-configure_failed, .o-timeout, .o-output_limit, .o-driver_failed, .o-unpack_failed { color: var(--bad); }
 .o-blocked, .o-prerequisites_unmet, .o-declined, .o-no_build_script { color: var(--warn); }
+.s-static, .v-yes { color: var(--good); }
+.s-not_static, .s-blocked, .v-no { color: var(--bad); }
+.s-driver_failed, .v-unknown { color: var(--warn); }
 .verdict .outcome { font-weight: 700; margin-right: 0.35rem; }
+
+form.check textarea {
+  display: block; width: 100%; min-height: 12rem; font: 0.9rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 0.5rem;
+}
+form.check label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.875rem; color: var(--ink-2); }
+form.check .row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0.5rem 0; }
 
 .crumbs { margin: 1rem 0 0; font-size: 0.925rem; }
 section.run { border-top: 1px solid var(--hairline); margin-top: 2rem; }

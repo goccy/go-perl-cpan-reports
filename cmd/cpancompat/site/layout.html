@@ -12,6 +12,9 @@
   <nav>
     <a href="{{.Root}}index.html"{{if eq .Current "index"}} aria-current="page"{{end}}>Overview</a>
     <a href="{{.Root}}dists.html"{{if eq .Current "dists"}} aria-current="page"{{end}}>Distributions</a>
+    {{- if .Site.Checker}}
+    <a href="{{.Root}}check.html"{{if eq .Current "check"}} aria-current="page"{{end}}>Check a cpanfile</a>
+    {{- end}}
     <a href="{{.Root}}methodology.html"{{if eq .Current "methodology"}} aria-current="page"{{end}}>Methodology</a>
   </nav>
 </header>

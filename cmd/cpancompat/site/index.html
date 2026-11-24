@@ -89,6 +89,26 @@ in the same environment{{end}}. <a href="methodology.html">How it is measured</a
 </div>
 </section>
 
+{{- if $sub.StaticCounts}}
+<section id="static">
+<h2>Static builds</h2>
+<p>For each reference distribution whose tests passed on {{$sub.Label}}: whether gperl builds a program that loads it
+into one binary, linked fully statically, that runs where there is nothing but the binary.
+{{- with $sub.Meta.Static}} gperl {{.Gperl.Version}}, {{.CC}}, {{.LibC}}, {{.Go}}.{{end}}
+<a href="methodology.html#static">How it is measured</a>{{if $s.Checker}}; <a href="check.html">check a cpanfile</a>{{end}}.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>static build</th><th class="num">distributions</th></tr></thead>
+  <tbody>
+  {{- range $sub.StaticCounts}}
+  <tr><td><a href="dists.html#static={{.Category.ID}}">{{.Category.Title}}</a></td><td class="num">{{num .Count}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
 {{- if and $c $c.RootBlockers}}
 <section>
 <h2>What blocks the most</h2>

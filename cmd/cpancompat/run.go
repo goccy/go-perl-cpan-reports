@@ -215,19 +215,21 @@ func recordInvocation(opts runOptions) error {
 		return fmt.Errorf("docker version: %w", err)
 	}
 	inv.Platform = strings.TrimSpace(string(out))
-	line, err := json.Marshal(inv)
+	return appendJSONLine(filepath.Join(opts.dataDir, "runs", opts.run, "invocations.jsonl"), inv)
+}
+
+// appendJSONLine appends v, as one line of JSON, to the file name.
+func appendJSONLine(name string, v any) error {
+	line, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(opts.dataDir, "runs", opts.run, "invocations.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	_, err = f.Write(append(line, '\n'))
+	return errors.Join(err, f.Close())
 }
 
 // maxAttempts bounds how often a distribution is run again because it

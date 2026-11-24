@@ -68,6 +68,14 @@ type siteRun struct {
 	// blocks lists, for each distribution, the ones that name it as
 	// blocking them.
 	blocks map[string][]string
+	// static and staticLogs are the run's static build phase (empty when
+	// it has none), provided what its interpreter ships.
+	static     map[string]*staticRecord
+	staticLogs map[string]*logExcerpt
+	provided   map[string]string
+	// StaticCounts counts the distributions by how their static build
+	// went; empty when the run has no static build phase.
+	StaticCounts []staticCount
 }
 
 // siteData is everything the pages are made from.
@@ -89,6 +97,10 @@ type siteData struct {
 	pages          map[string]string
 	// known are the entries of known-causes.json, by distribution.
 	known map[string]*knownCause
+	// packages is the snapshot's package index; with what the subject's
+	// interpreter ships, it makes the cpanfile checker (Checker).
+	packages []packageDist
+	Checker  bool
 }
 
 // knownLimitation is a known limitation of the subject run's interpreter:
@@ -108,14 +120,18 @@ func buildSiteData(p *published) (*siteData, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &siteData{Snapshot: p.snapshot, set: p.set, inSet: map[string]*refDist{}, known: known}
+	s := &siteData{Snapshot: p.snapshot, set: p.set, inSet: map[string]*refDist{}, known: known, packages: p.packages}
 	for i := range p.set {
 		s.inSet[p.set[i].Dist] = &p.set[i]
 	}
 	byName := map[string]*siteRun{}
 	for name, pr := range p.runs {
-		r := &siteRun{Name: name, Meta: pr.meta, Label: pr.meta.Interpreter.Name, data: pr.data, logs: pr.logs, blocks: map[string][]string{}}
+		r := &siteRun{
+			Name: name, Meta: pr.meta, Label: pr.meta.Interpreter.Name, data: pr.data, logs: pr.logs, blocks: map[string][]string{},
+			static: pr.static, staticLogs: pr.staticLogs, provided: pr.provided,
+		}
 		r.Coverage = coverageOn(p.set, pr.data)
+		r.StaticCounts = staticCounts(r, s.inSet)
 		for _, res := range pr.data.latest {
 			for _, b := range res.BlockedBy {
 				r.blocks[b] = append(r.blocks[b], res.Dist)
@@ -180,6 +196,7 @@ func buildSiteData(p *published) (*siteData, error) {
 		}
 	}
 	s.pages = pageNames(names)
+	s.Checker = s.packages != nil && s.Subject.provided != nil
 	return s, nil
 }
 
@@ -218,17 +235,21 @@ func pageNames(names map[string]bool) map[string]string {
 // distTable is dists.json, the data of the distributions page. Each row
 // holds, in the order of Columns, a distribution's name, release and
 // dependents, and indexes into Outcomes, Causes and Buckets (-1 for none),
-// and the name of its page when it differs from the distribution's.
+// the name of its page when it differs from the distribution's, and an
+// index into Static (-1 for none).
 type distTable struct {
-	Subject        string          `json:"subject"`
-	Reference      string          `json:"reference,omitempty"`
-	SubjectLabel   string          `json:"subject_label"`
-	ReferenceLabel string          `json:"reference_label,omitempty"`
-	Outcomes       []string        `json:"outcomes"`
-	Causes         []labelled      `json:"causes"`
-	Buckets        []labelled      `json:"buckets"`
-	Columns        []string        `json:"columns"`
-	Rows           [][]interface{} `json:"rows"`
+	Subject        string     `json:"subject"`
+	Reference      string     `json:"reference,omitempty"`
+	SubjectLabel   string     `json:"subject_label"`
+	ReferenceLabel string     `json:"reference_label,omitempty"`
+	Outcomes       []string   `json:"outcomes"`
+	Causes         []labelled `json:"causes"`
+	Buckets        []labelled `json:"buckets"`
+	// Static are the groups of the subject's static build phase; none
+	// when it has none.
+	Static  []staticCategory `json:"static,omitempty"`
+	Columns []string         `json:"columns"`
+	Rows    [][]interface{}  `json:"rows"`
 }
 
 type labelled struct {
@@ -241,7 +262,14 @@ type labelled struct {
 func distTableOf(s *siteData) distTable {
 	t := distTable{
 		Subject: s.Subject.Name, SubjectLabel: s.Subject.Label, Outcomes: outcomes,
-		Columns: []string{"dist", "release", "dependents", "subject_outcome", "reference_outcome", "cause", "bucket", "page"},
+		Columns: []string{"dist", "release", "dependents", "subject_outcome", "reference_outcome", "cause", "bucket", "page", "static"},
+	}
+	staticIndex := map[string]int{}
+	if len(s.Subject.static) > 0 {
+		t.Static = staticCategories()
+		for i, c := range t.Static {
+			staticIndex[c.ID] = i
+		}
 	}
 	causeIndex := map[cause]int{}
 	for i, c := range causes {
@@ -282,7 +310,11 @@ func distTableOf(s *siteData) distTable {
 		if p := s.pages[d.Dist]; p != d.Dist {
 			page = p
 		}
-		t.Rows = append(t.Rows, []interface{}{d.Dist, d.Release, d.DependentsTotal, index(so), ro, c, b, page})
+		st := -1
+		if id := staticCategoryOf(s.Subject.static[d.Dist]); id != "" {
+			st = staticIndex[id]
+		}
+		t.Rows = append(t.Rows, []interface{}{d.Dist, d.Release, d.DependentsTotal, index(so), ro, c, b, page, st})
 	}
 	return t
 }
@@ -311,6 +343,9 @@ type distRunView struct {
 	// TestFiles and FailingTests count the test files the harness
 	// reported on and the failing ones.
 	TestFiles, FailingTests int
+	// Static is its static build in the run; nil when the run did not
+	// measure it.
+	Static *staticView
 }
 
 func (s *siteData) distView(name string) distView {
@@ -319,7 +354,8 @@ func (s *siteData) distView(name string) distView {
 		if r == nil {
 			continue
 		}
-		rv := distRunView{Run: r, Result: r.data.latest[name], Failure: r.data.failures[name], Log: r.logs[name], Blocks: r.blocks[name]}
+		rv := distRunView{Run: r, Result: r.data.latest[name], Failure: r.data.failures[name], Log: r.logs[name], Blocks: r.blocks[name],
+			Static: staticViewOf(r, name)}
 		if k := s.known[name]; k != nil && rv.Failure != nil && rv.Failure.Cause == k.Cause {
 			rv.Known = k
 		}
@@ -375,11 +411,26 @@ func generateSite(results, out string) error {
 	if err := os.CopyFS(filepath.Join(out, "assets"), assets); err != nil {
 		return err
 	}
-	for _, pg := range []struct{ file, tmpl, title string }{
+	pages := []struct{ file, tmpl, title string }{
 		{"index.html", "index", "Overview"},
 		{"dists.html", "dists", "Distributions"},
 		{"methodology.html", "methodology", "Methodology and reproduction"},
-	} {
+	}
+	if s.Checker {
+		pages = append(pages, struct{ file, tmpl, title string }{"check.html", "check", "Check a cpanfile"})
+		c, err := checkDataOf(s)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(c)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(out, "check.json"), raw, 0o644); err != nil {
+			return err
+		}
+	}
+	for _, pg := range pages {
 		if err := renderPage(tmpl[pg.tmpl], filepath.Join(out, pg.file), page{Title: pg.title, Current: pg.tmpl, Site: s}); err != nil {
 			return err
 		}
@@ -471,16 +522,17 @@ func siteTemplates(s *siteData) (map[string]*template.Template, error) {
 		"firstGroups": func(n int, xs []distGroup) []distGroup {
 			return xs[:min(n, len(xs))]
 		},
-		"sub":   func(a, b int) int { return a - b },
-		"short": func(s string) string { return s[:min(7, len(s))] },
-		"join":  strings.Join,
+		"sub":              func(a, b int) int { return a - b },
+		"short":            func(s string) string { return s[:min(7, len(s))] },
+		"join":             strings.Join,
+		"staticCategories": staticCategories,
 	}
 	layout, err := template.New("layout").Funcs(funcs).ParseFS(siteFiles, "site/layout.html")
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]*template.Template{}
-	for _, name := range []string{"index", "dists", "dist", "methodology"} {
+	for _, name := range []string{"index", "dists", "dist", "methodology", "check"} {
 		t, err := layout.Clone()
 		if err != nil {
 			return nil, err

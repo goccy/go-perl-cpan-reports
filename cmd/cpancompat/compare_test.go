@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -139,7 +141,8 @@ func writeDataDir(t *testing.T, dists []dist, run string, results []result, logs
 	if err := writeJSONLines(filepath.Join(dir, distsFile), dists); err != nil {
 		t.Fatal(err)
 	}
-	writeFiles(t, dir, map[string]string{summaryFile: `{"perl":"5.44.0"}`})
+	writeFiles(t, dir, map[string]string{summaryFile: `{"perl":"5.44.0"}`, providedFile: `{"strict":"1.13"}`})
+	writePackageIndex(t, dir, dists)
 	if err := os.MkdirAll(filepath.Join(dir, "runs", run), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +155,40 @@ func writeDataDir(t *testing.T, dists []dist, run string, results []result, logs
 	}
 	writeFiles(t, dir, work)
 	return dir
+}
+
+// writePackageIndex writes the package index of a data directory: each
+// module of the distributions (or one named after a distribution without
+// any) at version 1.0, in the distribution's archive (its path, or else a
+// path made from its release).
+func writePackageIndex(t *testing.T, dir string, dists []dist) {
+	t.Helper()
+	var b bytes.Buffer
+	zw := gzip.NewWriter(&b)
+	if _, err := zw.Write([]byte("File: 02packages.details.txt\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range dists {
+		path := d.Path
+		if path == "" {
+			path = "A/AU/AUTHOR/" + d.Release + ".tar.gz"
+		}
+		modules := d.Modules
+		if len(modules) == 0 {
+			modules = []string{strings.ReplaceAll(d.Dist, "-", "::")}
+		}
+		for _, m := range modules {
+			if _, err := fmt.Fprintf(zw, "%s 1.0 %s\n", m, path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, packagesFile), b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestReport(t *testing.T) {
