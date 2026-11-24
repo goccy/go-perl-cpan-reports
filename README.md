@@ -1,4 +1,6 @@
-# go-perl CPAN Testers
+# go-perl CPAN Reports
+
+**Site: https://goccy.github.io/go-perl-cpan-reports/**
 
 How much of CPAN passes its own tests on [go-perl](https://github.com/goccy/go-perl),
 measured the way [CPAN Testers](https://www.cpantesters.org/) measure perl: every
