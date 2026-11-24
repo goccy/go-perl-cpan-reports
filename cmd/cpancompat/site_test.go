@@ -129,6 +129,7 @@ func TestGenerateSite(t *testing.T) {
 		"<div class=\"value\">33.3%</div>", // 1 of 3 passes on go-perl
 		"<div class=\"value\">100.0%</div>",
 		`href="d/Dep.html"`, // what blocks the most
+		`<script src="assets/theme.js" defer></script>`, `<button type="button" id="theme" class="theme" hidden></button>`,
 	} {
 		if !strings.Contains(index, want) {
 			t.Errorf("index.html lacks %q", want)
@@ -145,7 +146,7 @@ func TestGenerateSite(t *testing.T) {
 			t.Errorf("d/Evil.html lacks %q", want)
 		}
 	}
-	for _, rel := range []string{`href="../assets/style.css"`, `href="../index.html"`} {
+	for _, rel := range []string{`href="../assets/style.css"`, `src="../assets/theme.js"`, `href="../index.html"`} {
 		if !strings.Contains(evil, rel) {
 			t.Errorf("d/Evil.html lacks the relative link %s", rel)
 		}
@@ -171,7 +172,7 @@ func TestGenerateSite(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, "d", pages["Text-Tabs+Wrap"].(string)+".html")); err != nil {
 		t.Errorf("the page of Text-Tabs+Wrap: %v", err)
 	}
-	for _, name := range []string{"dists.html", "methodology.html", "assets/style.css", "assets/dists.js", ".nojekyll", "d/Dep.html"} {
+	for _, name := range []string{"dists.html", "methodology.html", "assets/style.css", "assets/dists.js", "assets/theme.js", ".nojekyll", "d/Dep.html"} {
 		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

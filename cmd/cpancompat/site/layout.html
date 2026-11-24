@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · go-perl CPAN Testers</title>
 <link rel="stylesheet" href="{{.Root}}assets/style.css">
+<script>try { var theme = localStorage.getItem("theme"); if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme; } catch (e) { /* no storage: the system's setting applies */ }</script>
+<script src="{{.Root}}assets/theme.js" defer></script>
 </head>
 <body>
 <header class="site">
@@ -17,6 +19,7 @@
     {{- end}}
     <a href="{{.Root}}methodology.html"{{if eq .Current "methodology"}} aria-current="page"{{end}}>Methodology</a>
   </nav>
+  <button type="button" id="theme" class="theme" hidden></button>
 </header>
 <main>
 {{- $s := .Site}}
