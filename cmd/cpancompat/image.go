@@ -3,8 +3,8 @@ package main
 import (
 	"archive/tar"
 	"bytes"
-	"debug/buildinfo"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -59,49 +59,31 @@ func buildImage(dataDir, gperl, sdk, perlImage, tag string) error {
 	return cmd.Run()
 }
 
-// gperlBuild identifies the gperl of the static build image, by the build
-// information of its binary (gperl.json in the image).
+// gperlBuild is the build information of the static build image's gperl
+// (gperl.json in the image, `go version -m -json` of it).
 type gperlBuild struct {
-	Module   string `json:"module"`
-	Version  string `json:"version"`
-	Revision string `json:"revision,omitempty"`
-	Modified bool   `json:"modified,omitempty"`
-	// DevReplace is the released go-perl version whose source its builds
-	// use (GPERL_DEV_REPLACE), "" when they resolve go-perl themselves.
-	DevReplace string `json:"dev_replace,omitempty"`
+	Path string `json:"Path"`
+	Main struct {
+		Path    string `json:"Path"`
+		Version string `json:"Version"`
+		Sum     string `json:"Sum"`
+	} `json:"Main"`
+	GoVersion string `json:"GoVersion"`
 }
 
+// gperlModule is the module gperl is installed from.
+const gperlModule = "github.com/goccy/go-perl"
+
 // buildStaticImage builds the image of the static build phase
-// (Dockerfile.static) around the given gperl binary, built for linux, and
-// the image without a single file the binaries are run in (emptyImage).
-// devReplace, when given, is the released go-perl version whose source the
-// image's builds use, for a gperl whose `gperl build` cannot resolve
-// go-perl itself.
-func buildStaticImage(dataDir, gperl, devReplace, tag string) error {
-	if gperl == "" {
-		return fmt.Errorf("image -static: give the gperl binary (-gperl)")
-	}
-	info, err := buildinfo.ReadFile(gperl)
-	if err != nil {
-		return fmt.Errorf("image -static: %w", err)
-	}
-	b := gperlBuild{Module: info.Main.Path, Version: info.Main.Version, DevReplace: devReplace}
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			b.Revision = s.Value
-		case "vcs.modified":
-			b.Modified = s.Value == "true"
-		}
+// (Dockerfile.static), with gperl installed from its module at version,
+// and the image without a single file the binaries are run in
+// (emptyImage).
+func buildStaticImage(dataDir, version, tag string) error {
+	if version == "" {
+		return fmt.Errorf("image -static: give the gperl version to install (-gperl-version)")
 	}
 	ctx := filepath.Join(dataDir, "static-image-context")
 	if err := writeContext(ctx, "Dockerfile.static", "packages", "mysql.sh", "user.sh", "static.sh", "load.pl"); err != nil {
-		return err
-	}
-	if err := writeJSON(filepath.Join(ctx, "gperl.json"), b); err != nil {
-		return err
-	}
-	if err := copyFile(gperl, filepath.Join(ctx, "gperl"), 0o755); err != nil {
 		return err
 	}
 	arch, err := exec.Command("docker", "version", "--format", "{{.Server.Arch}}").Output()
@@ -109,12 +91,27 @@ func buildStaticImage(dataDir, gperl, devReplace, tag string) error {
 		return fmt.Errorf("docker version: %w", err)
 	}
 	cmd := exec.Command("docker", "build", "-t", tag, "-f", filepath.Join(ctx, "Dockerfile.static"),
-		"--build-arg", "GO_ARCH="+strings.TrimSpace(string(arch)), "--build-arg", "DEV_REPLACE="+devReplace, ctx)
+		"--build-arg", "GO_ARCH="+strings.TrimSpace(string(arch)), "--build-arg", "GPERL_VERSION="+version, ctx)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return err
 	}
+	var stderr strings.Builder
+	read := exec.Command("docker", "run", "--rm", "--network", "none", tag, "cat", "/opt/cpancompat/gperl.json")
+	read.Stderr = &stderr
+	raw, err := read.Output()
+	if err != nil {
+		return fmt.Errorf("reading the image's gperl.json: %v: %s", err, stderr.String())
+	}
+	var b gperlBuild
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return fmt.Errorf("the image's gperl.json: %w", err)
+	}
+	if b.Main.Path != gperlModule || b.Main.Version != version {
+		return fmt.Errorf("the image's gperl is %s %s, not %s %s", b.Main.Path, b.Main.Version, gperlModule, version)
+	}
+	fmt.Fprintf(os.Stderr, "cpancompat: the image's gperl is %s %s (%s), built with %s\n", b.Main.Path, b.Main.Version, b.Main.Sum, b.GoVersion)
 	// An image from an empty archive: no file at all.
 	var empty bytes.Buffer
 	if err := tar.NewWriter(&empty).Close(); err != nil {

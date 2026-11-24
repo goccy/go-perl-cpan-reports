@@ -71,7 +71,7 @@ func usage() {
   cpancompat graph  [-data dir] [-perl version]
   cpancompat native [-data dir] [-top n]
   cpancompat image  [-data dir] (-gperl binary [-sdk dir] | -perl-image image) [-image tag]
-  cpancompat image  [-data dir] -static -gperl binary [-dev-replace version] [-image tag]
+  cpancompat image  [-data dir] -static -gperl-version version [-image tag]
   cpancompat run    [-data dir] -run name [-image tag] [-top n | -dists a,b,...]
                     [-jobs n] [-cpus n] [-memory size] [-wall duration]
                     [-test-limit duration] [-interpreter label] [-redo outcome,...]
@@ -101,7 +101,7 @@ func main() {
 	perl := fs.String("perl", "", "testers, graph: the perl version the interpreter is built from, as CPAN Testers names it (e.g. 5.44.0)")
 	perlImage := fs.String("perl-image", "", "image: build the reference image around this official perl image instead of gperl")
 	static := fs.Bool("static", false, "image: build the image of the static build phase around gperl instead")
-	devReplace := fs.String("dev-replace", "", "image -static: the released go-perl version whose source the builds use (GPERL_DEV_REPLACE), for a gperl whose `gperl build` cannot resolve go-perl itself")
+	gperlVersion := fs.String("gperl-version", "", "image -static: the version of go-perl whose gperl the image installs (go install github.com/goccy/go-perl/cmd/gperl@version)")
 	image := fs.String("image", "cpancompat:latest", "image, run, static: the container image tag")
 	run := fs.String("run", "", "run, static, report: the name of the run")
 	only := fs.String("dists", "", "run, static: only these distributions (comma separated), with what they need")
@@ -145,7 +145,7 @@ func main() {
 		err = scanNative(*data, *top)
 	case "image":
 		if *static {
-			err = buildStaticImage(*data, *gperl, *devReplace, *image)
+			err = buildStaticImage(*data, *gperlVersion, *image)
 		} else {
 			err = buildImage(*data, *gperl, *sdk, *perlImage, *image)
 		}

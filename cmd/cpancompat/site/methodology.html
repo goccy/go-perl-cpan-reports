@@ -165,11 +165,9 @@ such a binary of a program that uses the distribution runs where there is nothin
   distribution installed without a configure step); a program whose dependencies turn out to need more is built again
   with them. Every distribution is built once, in gperl's module directory, and every program of the run uses it.
   Distributions a program needs that did not pass themselves are built, not measured.</li>
-  <li><strong>The build</strong>: gperl {{.Gperl.Version}}{{with .Gperl.Revision}} (<code title="{{.}}">{{short .}}</code>){{end}}
+  <li><strong>The build</strong>: gperl {{.Gperl.Main.Version}}, installed with <code>go install {{.Gperl.Path}}@{{.Gperl.Main.Version}}</code>,
   builds the distributions with gcc and links the program with <code>{{.BuildFlags}}</code>, on the Debian of the survey
-  with the same packages ({{.CC}}, {{.LibC}}, {{.Go}}).
-  {{- with .Gperl.DevReplace}} Its builds use the source of go-perl {{.}} as the Go proxy serves it, given to gperl
-  through <code>GPERL_DEV_REPLACE</code>.{{end}}</li>
+  with the same packages ({{.CC}}, {{.LibC}}, {{.Go}}).</li>
   <li><strong>The binary</strong> must be fully static: it may name neither a program interpreter (<code>PT_INTERP</code>)
   nor shared libraries (<code>DT_NEEDED</code>), as its ELF headers tell.</li>
   <li><strong>It runs</strong> in an empty container. {{.Environment}} A binary that fails there is run again in the

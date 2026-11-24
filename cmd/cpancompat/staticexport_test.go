@@ -43,7 +43,7 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 		snapshotFile:                                `{"fetched_at":"2026-01-01T00:00:00Z","packages_url":"u","packages_sha256":"abc","releases":3}`,
 		"runs/sub/invocations.jsonl":                `{"image":"i","harness":{"module":"m"},"jobs":1,"cpus":"1","memory":"1g","wall_seconds":60,"test_seconds":30}` + "\n",
 		"runs/sub/static-invocations.jsonl":         `{"started":"2026-01-03T00:00:00Z","image":"s","platform":"linux/arm64","harness":{"module":"m"},"jobs":4,"cpus":"2","memory":"4g","wall_seconds":3600}` + "\n",
-		"runs/sub/static/probe/gperl.json":          `{"module":"github.com/goccy/go-perl","version":"v0.3.1"}`,
+		"runs/sub/static/probe/gperl.json":          `{"Path":"github.com/goccy/go-perl/cmd/gperl","Main":{"Path":"github.com/goccy/go-perl","Version":"v0.3.1","Sum":"h1:x"},"GoVersion":"go1.26.4"}`,
 		"runs/sub/static/probe/versions.json":       `{"cc":"gcc 12.2.0","libc":"glibc 2.36","go":"go1.26.4"}`,
 		"runs/sub/static/dists/Needy/run_empty.log": "load.pl: Needy: cannot open /etc/needy.conf at " + data + "/x line 1.\n",
 	})
@@ -67,7 +67,7 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 		t.Fatal(err)
 	}
 	pr := p.runs["sub"]
-	if len(pr.static) != 3 || pr.meta.Static == nil || pr.meta.Static.Gperl.Version != "v0.3.1" || pr.meta.Static.Recorded != 3 ||
+	if len(pr.static) != 3 || pr.meta.Static == nil || pr.meta.Static.Gperl.Main.Version != "v0.3.1" || pr.meta.Static.Recorded != 3 ||
 		len(pr.meta.Static.Invocations) != 1 || pr.provided["strict"] != "1.13" {
 		t.Fatalf("published run: static %d, meta %+v, provided %v", len(pr.static), pr.meta.Static, pr.provided)
 	}

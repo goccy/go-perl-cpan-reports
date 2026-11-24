@@ -41,14 +41,14 @@ TEST_LIMIT ?= 300s
 
 # The static build phase: its image, how many build containers run at once,
 # the CPUs and memory of each, and how long one of their phases may run.
-# DEV_REPLACE is the go-perl version whose source the builds use, for a
-# gperl whose `gperl build` cannot resolve go-perl itself.
+# Its gperl is installed in the image from go-perl's module at
+# GPERL_VERSION, the release GPERL was built from.
 STATIC_IMAGE  ?= cpancompat-static:$(RUN)
 STATIC_JOBS   ?= 4
 STATIC_CPUS   ?= 2
 STATIC_MEMORY ?= 4g
 STATIC_WALL   ?= 1h
-DEV_REPLACE   ?=
+GPERL_VERSION ?=
 
 # Where the results the repository keeps and the site go. With
 # PROVISIONAL=1, the runs are exported as provisional, with NOTE saying
@@ -90,7 +90,7 @@ snapshot: $(CPANCOMPAT)
 images: $(CPANCOMPAT) require-gperl require-commit
 	$(CPANCOMPAT) image -data $(DATA) -gperl $(GPERL) -image $(IMAGE)
 	$(CPANCOMPAT) image -data $(REF_DATA) -perl-image $(PERL_IMAGE) -image $(REF_IMAGE)
-	$(CPANCOMPAT) image -data $(DATA) -static -gperl $(GPERL) $(if $(DEV_REPLACE),-dev-replace $(DEV_REPLACE)) -image $(STATIC_IMAGE)
+	$(CPANCOMPAT) image -data $(DATA) -static -gperl-version $(GPERL_VERSION) -image $(STATIC_IMAGE)
 
 # The modules each interpreter ships, listed by provided.pl run in its own
 # survey image (no network, no capabilities); the graph needs them.

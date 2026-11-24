@@ -26,24 +26,23 @@ RUN case "$GO_ARCH" in \
  && tar -C /usr/local -xzf /tmp/go.tar.gz \
  && rm /tmp/go.tar.gz
 
-COPY gperl /opt/gperl/bin/gperl
+# gperl, installed from its released module (cpancompat image -static
+# -gperl-version <version>) through the Go proxy, as a user installs it;
+# gperl.json is its build information.
+ARG GPERL_VERSION
+RUN test -n "$GPERL_VERSION" \
+ && mkdir -p /opt/gperl/bin \
+ && GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/opt/gperl/bin GOFLAGS=-modcacherw /usr/local/go/bin/go install github.com/goccy/go-perl/cmd/gperl@$GPERL_VERSION \
+ && rm -rf /tmp/gopath /root/.cache/go-build \
+ && /usr/local/go/bin/go version -m -json /opt/gperl/bin/gperl > /opt/cpancompat/gperl.json
+
 RUN sh /opt/cpancompat/user.sh \
- && mkdir -p /opt/gperl/mod /opt/go-cache /opt/go-src /bin-out /app \
- && chown cpan:cpan /opt/gperl/mod /opt/go-cache /opt/go-src /bin-out /app
-COPY static.sh load.pl gperl.json /opt/cpancompat/
+ && mkdir -p /opt/gperl/mod /opt/go-cache /bin-out /app \
+ && chown cpan:cpan /opt/gperl/mod /opt/go-cache /bin-out /app
+COPY static.sh load.pl /opt/cpancompat/
 
 ENV USER=cpan LOGNAME=cpan HOME=/home/cpan SHELL=/bin/bash LANG=C.UTF-8 \
     PATH=/opt/gperl/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GPERLMODCACHE=/opt/gperl/mod GOCACHE=/opt/go-cache/build GOMODCACHE=/opt/go-cache/mod GOTOOLCHAIN=local \
     CC=gcc CGO_ENABLED=1 GOFLAGS=-ldflags=-extldflags=-static
 USER cpan
-
-# A gperl whose `gperl build` cannot resolve go-perl itself builds against
-# the source of a released go-perl version instead (cpancompat image -static
-# -dev-replace <version>): the module, as the Go proxy serves it, given to
-# gperl through GPERL_DEV_REPLACE.
-ARG DEV_REPLACE=
-RUN if [ -n "$DEV_REPLACE" ]; then \
-      GOMODCACHE=/opt/go-src GOFLAGS= go mod download github.com/goccy/go-perl@$DEV_REPLACE; \
-    fi
-ENV GPERL_DEV_REPLACE=${DEV_REPLACE:+github.com/goccy/go-perl=/opt/go-src/github.com/goccy/go-perl@$DEV_REPLACE}

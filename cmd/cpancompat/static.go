@@ -33,6 +33,7 @@ import (
 	"cmp"
 	"container/heap"
 	"context"
+	"debug/buildinfo"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -581,6 +583,7 @@ type staticProbe struct {
 	// the first directory that has it.
 	archives map[string]string
 	runtime  runtimeSymbols
+	gperl    gperlBuild
 }
 
 // runProbe asks the image for its compiler's library directories, the
@@ -661,6 +664,12 @@ func readProbe(dir string) (*staticProbe, error) {
 	if p.runtime, err = readRuntimeSymbols(filepath.Join(dir, "runtime")); err != nil {
 		return nil, err
 	}
+	if raw, err = os.ReadFile(filepath.Join(dir, "gperl.json")); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &p.gperl); err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "gperl.json"), err)
+	}
 	return p, nil
 }
 
@@ -708,6 +717,9 @@ func (s *staticRunner) warm() error {
 	if len(phases) != 1 || phases[0].Status != 0 {
 		return fmt.Errorf("warm: building a program without dependencies failed (%s)", filepath.Join(dir, "link.log"))
 	}
+	if err := s.linksOwnGoPerl(name, filepath.Join(dir, "app")); err != nil {
+		return fmt.Errorf("warm: %w", err)
+	}
 	run, err := s.runBinary(name+"-run", b.volume, filepath.Join(dir, "run_empty.log"), true)
 	if err != nil {
 		return fmt.Errorf("warm: %w", err)
@@ -716,6 +728,31 @@ func (s *staticRunner) warm() error {
 		return fmt.Errorf("warm: a program without dependencies failed in the empty container (%s)", filepath.Join(dir, "run_empty.log"))
 	}
 	fmt.Fprintf(os.Stderr, "cpancompat: a program without dependencies builds in %ds and runs in the empty container\n", phases[0].Seconds)
+	return nil
+}
+
+// linksOwnGoPerl copies the binary the build container name made to bin and
+// checks, by its build information, that the program gperl generated
+// links go-perl at gperl's own released version (not a replacement).
+func (s *staticRunner) linksOwnGoPerl(name, bin string) error {
+	if err := copyFileOut(name, "/bin-out/app", bin); err != nil {
+		return err
+	}
+	info, err := buildinfo.ReadFile(bin)
+	if err != nil {
+		return err
+	}
+	want := s.probe.gperl.Main.Version
+	var linked *debug.Module
+	for _, dep := range info.Deps {
+		if dep.Path == gperlModule {
+			linked = dep
+		}
+	}
+	if linked == nil || linked.Replace != nil || linked.Version != want {
+		return fmt.Errorf("the program gperl %s built does not link %s %s as released: %+v", want, gperlModule, want, linked)
+	}
+	fmt.Fprintf(os.Stderr, "cpancompat: gperl %s builds programs that link %s %s (%s)\n", want, gperlModule, linked.Version, linked.Sum)
 	return nil
 }
 
