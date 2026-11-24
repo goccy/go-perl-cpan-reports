@@ -14,23 +14,26 @@ what fails in this environment anyway.
 
 ## Current results
 
-The results in `results/` are **provisional**. The go-perl results are not one run of
-one binary: `gperl-7647471-combined` gives each distribution its latest result from the
-development builds of go-perl measured from 2026-11-17 to 2026-11-19, on unreleased
-branches. 2,165 distributions were last measured with go-perl `7647471` or `49e6b7c`
-(which differs from it in one narrow fix), 7,952 come from the full survey of
-`ee7dd1b`, and the rest from a partial survey of `58ab759` and spot checks of other
-builds; the run's `meta.json` gives the breakdown. They will be replaced by one full
-survey of gperl once these changes are merged.
+The results in `results/` are **provisional**. `go-perl` is one full survey of the
+released gperl v0.3.0, on the CPAN snapshot of 2026-11-20; `perl`, the run of perl
+itself, is from the snapshot of 2026-11-10. The two are joined by distribution name: a
+distribution whose latest release changed between the snapshots was measured at a
+different release on each, and its page names the release each run measured.
 
-| run | interpreter | passes, of 14,318 |
+| run | interpreter | passes, of 14,437 |
 |---|---|---|
-| `gperl-7647471-combined` | gperl, development builds up to go-perl `7647471` | 13,487 (94.2%) |
-| `ref2` | perl 5.44.0 | 13,981 (97.6%) |
+| `go-perl` | gperl, go-perl v0.3.0 | 13,486 (93.4%) |
+| `perl` | perl 5.44.0 | 13,978 (96.8%) |
 
-go-perl passes 96.3% of what perl passes. All runs: the CPAN snapshot of 2026-11-10,
-16 distributions at a time, each container with one CPU and 1500 MiB of memory, the
-test phase of a distribution limited to five minutes, on linux/arm64.
+go-perl passes 96.3% of what perl passes. Both runs: 16 distributions at a time, each
+container with one CPU and 1500 MiB of memory, the test phase of a distribution limited
+to five minutes, on linux/arm64.
+
+The static builds of what passed on go-perl were made with gperl v0.3.1, installed from
+its released module. Of the 13,486 reference distributions that passed, 8,440 build into
+a fully static binary that runs where there is nothing but the binary, and 512 do too,
+linking libraries of the system from their static archives; the site gives the reason
+for each of the others.
 
 ## Repository layout
 
@@ -213,10 +216,8 @@ make survey GPERL=path/to/gperl GPERL_COMMIT=<the go-perl commit gperl was built
   `-trimpath` keeps the paths of your machine out of the binary, whose Go stack traces
   in the logs name source files by them.
 
-  The provisional results in this repository were made with gperl built from
-  unreleased go-perl development branches (up to commit `7647471`, with interpreter
-  builds that are not published), which cannot be rebuilt from public sources. A survey
-  of the released gperl, or of any public go-perl commit, can be.
+  The go-perl results in this repository were made with the released gperl v0.3.0
+  (`gperl_v0.3.0_linux_arm64` of its GitHub release).
 
 - About 10 GB free on your machine for the data directories: the archives of the
   distributions (3.7 GB), the downloads, and the records and logs of both runs.
@@ -240,8 +241,8 @@ interrupted `run` continues where it stopped.
 The durations of `run` are those of the provisional runs, with the limits of the
 Makefile (`JOBS=16 CPUS=1 MEMORY=1500m TEST_LIMIT=300s`). These, like every variable
 of the Makefile (`DATA`, `REF_DATA`, `RUN`, `REF_RUN`, `PERL_VERSION`, `RESULTS`, ...),
-can be set on the command line. The runs are named `gperl-<commit>` and
-`perl-5.44.0`; their records and logs are in `data/gperl/runs/<run>/` and
+can be set on the command line. The runs are named `go-perl` and
+`perl`; their records and logs are in `data/gperl/runs/<run>/` and
 `data/perl/runs/<run>/`, and `export` writes them into `results/<run>/`. To export
 the runs as provisional, add `PROVISIONAL=1 NOTE='what they are'`.
 
