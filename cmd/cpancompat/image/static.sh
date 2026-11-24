@@ -61,6 +61,12 @@ if [ "$mode" = cache ]; then
     cp $tools/load.pl "$work/load.pl"
     (cd "$work" && gperl build -o "$work/app" load.pl)
     rm -rf "$work"
+    # The go command sets the modification time of a cache entry it uses
+    # when that time is an hour old or more (cmd/go/internal/cache
+    # markUsed): in a container started from the committed image, that
+    # copies the entry out of the image into the container, all of the
+    # cache for every program. Entries dated after any run never are.
+    find "$(go env GOCACHE)" -exec touch -d 2100-01-01 {} +
     exit 0
 fi
 
