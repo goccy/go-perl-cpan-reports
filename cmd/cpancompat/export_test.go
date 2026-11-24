@@ -173,19 +173,23 @@ func TestExportAndReadPublished(t *testing.T) {
 		t.Errorf("exporting again changed %s", failuresGzFile)
 	}
 
-	// A run of another snapshot does not go into the same results, and
-	// another snapshot does not replace the one its runs were measured on.
+	// A run of another snapshot is not exported into the results; a new
+	// snapshot replaces the one the runs there were measured on, and they
+	// stay, joined with it by distribution name.
 	writeFiles(t, subject, map[string]string{snapshotFile: `{"packages_sha256":"other"}`})
 	if err := exportRun(opts); err == nil {
 		t.Errorf("a run of another snapshot was exported")
 	}
-	if err := exportReferenceSet(subject, results); err == nil {
-		t.Errorf("the snapshot of the results was replaced while a run of it is there")
-	}
-	if err := os.RemoveAll(filepath.Join(results, "sub")); err != nil {
-		t.Fatal(err)
-	}
 	if err := exportReferenceSet(subject, results); err != nil {
-		t.Errorf("replacing the snapshot of results without runs: %v", err)
+		t.Fatalf("replacing the snapshot of results with runs: %v", err)
+	}
+	if p, err := readPublished(results); err != nil || p.snapshot.PackagesSHA256 != "other" || p.runs["sub"] == nil ||
+		p.runs["sub"].data.latest["A"] == nil {
+		t.Errorf("results after a new snapshot: %v", err)
+	}
+	// Not the reference set of another perl version.
+	writeFiles(t, subject, map[string]string{summaryFile: `{"perl":"5.42.0"}`})
+	if err := exportReferenceSet(subject, results); err == nil {
+		t.Errorf("the reference set of another perl version replaced the one of the runs there")
 	}
 }

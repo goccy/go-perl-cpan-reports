@@ -142,14 +142,16 @@ func exportReferenceSet(dataDir, results string) error {
 	if err != nil {
 		return err
 	}
-	if old, err := readPublishedSnapshot(results); err == nil && (old.PackagesSHA256 != ps.PackagesSHA256 || old.Perl != ps.Perl) {
-		// The runs there were measured on the snapshot being replaced.
+	// Runs of an earlier snapshot stay, joined with the new one by
+	// distribution name (readPublished); runs of the reference set of
+	// another perl version do not.
+	if old, err := readPublishedSnapshot(results); err == nil && old.Perl != ps.Perl {
 		p, err := readPublished(results)
 		if err != nil {
 			return err
 		}
 		if len(p.runs) > 0 {
-			return fmt.Errorf("refset: %s holds runs of another snapshot; remove them first", results)
+			return fmt.Errorf("refset: %s holds runs of the reference set of perl %s; remove them first", results, old.Perl)
 		}
 	}
 	if err := os.MkdirAll(results, 0o755); err != nil {
@@ -615,8 +617,11 @@ func readPublished(results string) (*published, error) {
 		if pr.meta.Run != e.Name() {
 			return nil, fmt.Errorf("%s: names run %q", filepath.Join(dir, metaFile), pr.meta.Run)
 		}
-		if pr.meta.PackagesSHA256 != p.snapshot.PackagesSHA256 || pr.meta.Perl != p.snapshot.Perl {
-			return nil, fmt.Errorf("run %s was measured on another snapshot than %s describes", e.Name(), publishedSnapshotFile)
+		// A run of an earlier snapshot is joined with this one by
+		// distribution name: its results say which release it measured.
+		if pr.meta.Perl != p.snapshot.Perl {
+			return nil, fmt.Errorf("run %s was measured on the reference set of perl %s, not of perl %s as %s describes",
+				e.Name(), pr.meta.Perl, p.snapshot.Perl, publishedSnapshotFile)
 		}
 		results, err := readGzipJSONLines[result](filepath.Join(dir, resultsGzFile))
 		if err != nil {
