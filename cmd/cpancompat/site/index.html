@@ -31,7 +31,7 @@ in the same environment{{end}}. <a href="methodology.html">How it is measured</a
   {{- range $r := $s.Shown}}
   <dt>{{$r.Label}}</dt>
   <dd>{{if $r.Meta.Interpreter.Version}}version {{$r.Meta.Interpreter.Version}}{{end}}
-    {{- if $r.Meta.Interpreter.Commit}}built from commit <code title="{{$r.Meta.Interpreter.Commit}}">{{short $r.Meta.Interpreter.Commit}}</code>{{end}};
+    {{- if $r.Meta.Interpreter.Commit}}{{if $r.Meta.Interpreter.Version}}, {{end}}built from commit <code title="{{$r.Meta.Interpreter.Commit}}">{{short $r.Meta.Interpreter.Commit}}</code>{{end}};
     run <code>{{$r.Name}}</code>, {{dates $r.Meta.FirstResult $r.Meta.LastResult}};
     image built on <code>{{$r.Meta.BaseImage}}</code>{{if $r.Meta.Provisional}}; <strong>provisional</strong>{{end}}</dd>
   {{- with $r.Meta.Static}}
