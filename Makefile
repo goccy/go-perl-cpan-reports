@@ -26,8 +26,8 @@ GPERL_BASE_IMAGE := debian:bookworm-slim
 DATA     ?= $(CURDIR)/data/gperl
 REF_DATA ?= $(CURDIR)/data/perl
 
-RUN       ?= gperl-$(GPERL_SHORT)
-REF_RUN   ?= perl-$(PERL_VERSION)
+RUN       ?= go-perl
+REF_RUN   ?= perl
 IMAGE     ?= cpancompat:$(RUN)
 REF_IMAGE ?= cpancompat-ref:$(PERL_VERSION)
 
