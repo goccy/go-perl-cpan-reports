@@ -3,8 +3,10 @@
 # static archives of the C libraries), the Go toolchain gperl build runs,
 # and gperl, which builds distributions with gcc (CC) and links programs
 # with cgo, fully statically against glibc (GOFLAGS), as the survey's
-# unprivileged user. Distributions live in gperl's module directory and Go
-# keeps its caches below /opt/go-cache: volumes the run's containers share.
+# unprivileged user. Distributions live in gperl's module directory, a
+# volume the run's containers share; Go keeps its caches below
+# /opt/go-cache, in the image the run makes from this one (static's cache
+# image).
 FROM debian:bookworm-slim
 
 COPY packages mysql.sh user.sh /opt/cpancompat/

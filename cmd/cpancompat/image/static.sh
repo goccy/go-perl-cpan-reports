@@ -33,14 +33,17 @@
 # the snapshot, the measured distribution's first.
 #
 # usage: static.sh app|deps|warm <phase limit in seconds> <own tree or ->
-#        static.sh probe
+#        static.sh probe|cache
 #
 # "app" builds the snapshot and links the program, "deps" only builds the
 # snapshot (a distribution built because others need it), "warm" links a
 # program without dependencies. "probe" records what the image's toolchain
 # is instead: search-dirs.txt (the compiler's library directories, in its
 # order), archives.txt (the static archives in them), runtime/ (the C
-# runtime's shared libraries), versions.json and gperl.json.
+# runtime's shared libraries), versions.json and gperl.json. "cache" links
+# a program without dependencies and removes it, leaving the Go build and
+# module caches it filled (the container is committed as the image the
+# others start from).
 #
 # It runs as the image's unprivileged user. The orchestration is a shell
 # script on purpose, as dist.sh is.
@@ -49,6 +52,17 @@ mode=$1
 out=/out
 mod=$GPERLMODCACHE
 tools=/opt/cpancompat
+
+if [ "$mode" = cache ]; then
+    set -e
+    work=$(mktemp -d)
+    mkdir "$work/lib"
+    : > "$work/lib/cpancompat-load.txt"
+    cp $tools/load.pl "$work/load.pl"
+    (cd "$work" && gperl build -o "$work/app" load.pl)
+    rm -rf "$work"
+    exit 0
+fi
 
 if [ "$mode" = probe ]; then
     set -e

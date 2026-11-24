@@ -312,11 +312,13 @@ type staticRunner struct {
 	staticDir string
 	treesDir  string
 	archives  string
-	// modVolume is gperl's module directory, goVolume the Go build and
-	// module caches; both are shared by all containers.
+	// modVolume is gperl's module directory, shared by all containers.
 	modVolume string
-	goVolume  string
-	label     string
+	// cacheImage is the image with the Go build and module caches of a
+	// program without dependencies (makeCacheImage); every build container
+	// starts from it, and what a container adds to them goes with it.
+	cacheImage string
+	label      string
 	results   *os.File
 
 	probe *staticProbe
@@ -344,7 +346,7 @@ func runStatic(opts staticOptions) (err error) {
 		nodes: map[string]*staticNode{}, waiters: map[string][]*staticNode{},
 		runDir:       filepath.Join(opts.dataDir, "runs", opts.run),
 		modVolume:    "cpancompat-" + opts.run + "-static-mod",
-		goVolume:     "cpancompat-" + opts.run + "-static-go",
+		cacheImage:   "cpancompat-static-cache:" + opts.run,
 		label:        "cpancompat-static=" + opts.run,
 		requirements: map[string]*distRequirements{}, verified: map[string]bool{},
 	}
@@ -428,6 +430,9 @@ func runStatic(opts staticOptions) (err error) {
 		return err
 	}
 	if s.probe, err = s.runProbe(len(earlier) > 0); err != nil {
+		return err
+	}
+	if err := s.makeCacheImage(); err != nil {
 		return err
 	}
 	if err := s.warm(); err != nil {
@@ -528,10 +533,8 @@ func (s *staticRunner) prepareDocker() error {
 	if len(strings.Fields(string(out))) == 0 && len(s.previous) > 0 {
 		return fmt.Errorf("the run's module directory (volume %s) is gone and its records are not: they cannot be continued", s.modVolume)
 	}
-	for _, v := range []string{s.modVolume, s.goVolume} {
-		if out, err := exec.Command("docker", "volume", "create", v).CombinedOutput(); err != nil {
-			return fmt.Errorf("docker volume create: %v: %s", err, out)
-		}
+	if out, err := exec.Command("docker", "volume", "create", s.modVolume).CombinedOutput(); err != nil {
+		return fmt.Errorf("docker volume create: %v: %s", err, out)
 	}
 	// Docker fills an empty volume from the image the first time a
 	// container mounts it (see runSurvey). The directories each container
@@ -540,7 +543,7 @@ func (s *staticRunner) prepareDocker() error {
 	// directory with it, where gperl then could not write.
 	if out, err := exec.Command("docker", "run", "--rm", "--network", "none",
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--ulimit", "core=0",
-		"-v", s.modVolume+":/opt/gperl/mod", "-v", s.goVolume+":/opt/go-cache",
+		"-v", s.modVolume+":/opt/gperl/mod",
 		s.opts.image, "mkdir", "-p", "/opt/gperl/mod/cache/sdk", "/opt/gperl/mod/cache/linkset",
 		"/opt/gperl/mod/cache/lib", "/opt/gperl/mod/cache/download").CombinedOutput(); err != nil {
 		return fmt.Errorf("filling the volumes from %s: %v: %s", s.opts.image, err, out)
@@ -549,18 +552,19 @@ func (s *staticRunner) prepareDocker() error {
 }
 
 // buildArgs are the docker create arguments of a build container, up to
-// the image: the shared volumes, a binary volume of its own at /bin-out,
+// the image: the module directory, a binary volume of its own at /bin-out,
 // and its own tmpfs where gperl writes per process (the SDK headers, which
 // it writes again for every build) or per program (the link set and the
 // merged module tree), so that containers neither change one another's
-// files nor leave theirs behind.
+// files nor leave theirs behind. The Go caches are the image's
+// (makeCacheImage): what a program adds to them, nothing else uses, and it
+// goes with the container.
 func (s *staticRunner) buildArgs(binVolume string, offlineGo bool) []string {
 	args := []string{
 		"--init", "--network", surveyNetwork,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--ulimit", "core=0",
 		"--cpus", s.opts.cpus, "--memory", s.opts.memory, "--pids-limit", "4096",
 		"-v", s.modVolume + ":/opt/gperl/mod",
-		"-v", s.goVolume + ":/opt/go-cache",
 		"-v", binVolume + ":/bin-out",
 		"-v", s.archives + ":/archives:ro",
 		"--tmpfs", "/opt/gperl/mod/cache/sdk:rw,mode=1777",
@@ -568,11 +572,53 @@ func (s *staticRunner) buildArgs(binVolume string, offlineGo bool) []string {
 		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,mode=1777",
 	}
 	if offlineGo {
-		// The Go modules every program needs are in the module cache
-		// since warm.
+		// The Go modules every program needs are in the cache image's
+		// module cache.
 		args = append(args, "-e", "GOPROXY=off")
 	}
 	return args
+}
+
+// makeCacheImage makes the cache image: the image with the Go build and
+// module caches a program without dependencies leaves (static.sh cache),
+// committed from the container that built it. Kept in a volume, the caches
+// would grow by every program's own packages (its embedded module tree, its
+// native modules), which no other program uses.
+func (s *staticRunner) makeCacheImage() error {
+	name := "cpancompat-" + s.opts.run + "-static-cache"
+	log, err := os.Create(filepath.Join(s.staticDir, "cache.log"))
+	if err != nil {
+		return err
+	}
+	end, _, err := runContainer(name, s.label, []string{"--network", surveyNetwork, "--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges", "--ulimit", "core=0", "--cpus", s.opts.cpus, "--memory", s.opts.memory,
+		s.opts.image, "bash", "/opt/cpancompat/static.sh", "cache"}, nil, log, 0)
+	if err = errors.Join(err, log.Close()); err == nil && end.ExitCode != 0 {
+		err = fmt.Errorf("static.sh cache ended with status %d%s (%s)", end.ExitCode, end.errorText(), log.Name())
+	}
+	var old []byte
+	if err == nil {
+		// The image an earlier invocation made goes once this one has its
+		// own: no container uses it any more (prepareDocker).
+		old, err = exec.Command("docker", "image", "ls", "--quiet", s.cacheImage).Output()
+	}
+	if err == nil {
+		if out, cerr := exec.Command("docker", "commit", name, s.cacheImage).CombinedOutput(); cerr != nil {
+			err = fmt.Errorf("docker commit: %v: %s", cerr, out)
+		}
+	}
+	if ids := strings.Fields(string(old)); err == nil && len(ids) > 0 {
+		if out, rerr := exec.Command("docker", append([]string{"image", "rm"}, ids...)...).CombinedOutput(); rerr != nil {
+			err = fmt.Errorf("docker image rm: %v: %s", rerr, out)
+		}
+	}
+	if rmErr := removeContainers(name); rmErr != nil {
+		err = errors.Join(err, rmErr)
+	}
+	if err != nil {
+		return fmt.Errorf("cache image: %w", err)
+	}
+	return nil
 }
 
 // staticProbe is what the image says about its toolchain.
@@ -1629,7 +1675,7 @@ func (s *staticRunner) build(name, dir, mode, own string, input []byte, offlineG
 	}()
 	// Each phase of the container has its time limit (static.sh); what it
 	// does besides is copying files.
-	args := append(s.buildArgs(b.volume, offlineGo), s.opts.image, "bash", "/opt/cpancompat/static.sh",
+	args := append(s.buildArgs(b.volume, offlineGo), s.cacheImage, "bash", "/opt/cpancompat/static.sh",
 		mode, strconv.Itoa(int(s.opts.wall/time.Second)), own)
 	end, _, runErr := runContainer(name, s.label, args, input, log, 0)
 	if err := log.Close(); err != nil {
@@ -1663,7 +1709,7 @@ func (s *staticRunner) runBinary(name, volume, logName string, empty bool) (phas
 		p.Phase = "run_empty"
 		args = append(args, "--user", loadUser, "--read-only", emptyImage, "/app/app")
 	} else {
-		args = append(args, s.opts.image, "/app/app")
+		args = append(args, s.cacheImage, "/app/app")
 	}
 	log, err := os.Create(logName)
 	if err != nil {
