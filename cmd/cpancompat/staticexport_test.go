@@ -51,7 +51,7 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 	if err := exportReferenceSet(data, results); err != nil {
 		t.Fatal(err)
 	}
-	if err := exportRun(exportOptions{dataDir: data, run: "sub", results: results, interpreter: interpreterMeta{Name: "go-perl", Commit: "c0ffee"}}); err != nil {
+	if err := exportRun(exportOptions{dataDir: data, run: "sub", results: results, interpreter: interpreterMeta{Name: "go-perl", Version: "v0.3.0", Commit: "c0ffee"}}); err != nil {
 		t.Fatal(err)
 	}
 	packages, err := readGzipJSONLines[packageDist](filepath.Join(results, packagesGzFile))
@@ -89,7 +89,9 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 		return string(raw)
 	}
 	ssl := read("d/Net-SSLeay.html")
-	for _, want := range []string{"Static build", "Static (links system libraries statically)", "<code>libssl</code>", "<code>libcrypto</code>"} {
+	// The static builds' gperl and the tests' interpreter are told apart.
+	for _, want := range []string{"Static build", "Static (links system libraries statically)", "<code>libssl</code>", "<code>libcrypto</code>",
+		"with gperl v0.3.1; the tests above ran on go-perl v0.3.0"} {
 		if !strings.Contains(ssl, want) {
 			t.Errorf("d/Net-SSLeay.html lacks %q", want)
 		}
@@ -97,7 +99,9 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 	if needy := read("d/Needy.html"); !strings.Contains(needy, "Not static: "+staticReasonTitles[reasonNeedsEnvironment]) || !strings.Contains(needy, "/etc/needy.conf") {
 		t.Errorf("d/Needy.html:\n%s", needy)
 	}
-	if index := read("index.html"); !strings.Contains(index, "Static builds") || !strings.Contains(index, `href="dists.html#static=static%3abundles_system_libraries"`) {
+	if index := read("index.html"); !strings.Contains(index, "Static builds") || !strings.Contains(index, `href="dists.html#static=static%3abundles_system_libraries"`) ||
+		!strings.Contains(index, "The tests ran on go-perl v0.3.0 (c0ffee);\nthe static builds were made with gperl v0.3.1") ||
+		!strings.Contains(index, "made with gperl v0.3.1, 2026-01-03") {
 		t.Errorf("index.html has no static build counts")
 	}
 	if m := read("methodology.html"); !strings.Contains(m, `id="static"`) || !strings.Contains(m, `id="checker"`) {

@@ -102,7 +102,7 @@
 {{- end}}{{end}}
 
 {{- with .Static}}
-<h3 id="static">Static build</h3>
+<h3 id="static">Static build{{with $r.Meta.Static}} <span class="muted">with gperl {{.Gperl.Main.Version}}; the tests above ran on {{$r.Label}}{{with $r.Meta.Interpreter.Version}} {{.}}{{end}}</span>{{end}}</h3>
 <p class="verdict"><span class="outcome s-{{.Rec.State}}">{{.Category.Title}}</span>
   {{- if .Libraries}}: {{range $i, $l := .Libraries}}{{if $i}}, {{end}}<code>lib{{$l}}</code>{{end}}{{end}}.
   <span class="muted">{{.Rec.Release}}{{if gt .Rec.Attempts 1}}, {{.Rec.Attempts}} attempts{{end}}, {{duration .Rec.Seconds}}, finished {{date .Rec.Finished}}</span></p>
