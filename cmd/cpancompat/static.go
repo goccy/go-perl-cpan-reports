@@ -1086,7 +1086,10 @@ func (s *staticRunner) closure(n *staticNode) ([]string, error) {
 // requirementsOf returns what the distribution needs to be configured,
 // built and run: the "requires" of those phases in the MYMETA.json its
 // build left in the module directory (collected into the run's trees), or
-// else in its static metadata. A requirement the interpreter's standard
+// else in its static metadata. As under cpanm and gperl
+// (internal/mod/helper.pl meta), a distribution with a Build.PL that
+// requires nothing to configure requires Module::Build 0.38, unless it is
+// one Module::Build itself needs. A requirement the interpreter's standard
 // library meets, perl itself and a module the index does not know need no
 // distribution.
 func (s *staticRunner) requirementsOf(name string) (*distRequirements, error) {
@@ -1095,24 +1098,41 @@ func (s *staticRunner) requirementsOf(name string) (*distRequirements, error) {
 	}
 	d := s.dists[name]
 	var lines []snapshotPackage
+	configures := false
 	mymeta := ""
-	if tree, err := gperlTreeName(d.Path); err == nil {
+	tree, err := gperlTreeName(d.Path)
+	if err == nil {
 		mymeta = filepath.Join(s.treesDir, tree, "MYMETA.json")
 	}
 	raw, err := os.ReadFile(mymeta)
 	switch {
 	case mymeta != "" && err == nil:
-		if lines, err = mymetaRequirements(raw); err != nil {
+		if lines, configures, err = mymetaRequirements(raw); err != nil {
 			return nil, fmt.Errorf("%s: %w", mymeta, err)
 		}
 	case mymeta == "" || errors.Is(err, os.ErrNotExist):
 		for _, req := range d.Requires {
 			if req.Relationship == "requires" && staticPhases[req.Phase] {
 				lines = append(lines, snapshotPackage{req.Module, cmp.Or(req.Version, "0")})
+				configures = configures || req.Phase == "configure"
 			}
 		}
 	default:
 		return nil, err
+	}
+	if distName, _, _ := strings.Cut(tree, "@"); mymeta != "" && !configures && !moduleBuildNeeds[distName] {
+		archive, err := fetchArchive(s.opts.dataDir, d)
+		if err != nil {
+			return nil, err
+		}
+		s.verified[name] = true
+		names, err := archiveNames(d.Path, archive)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", d.Path, err)
+		}
+		if extractedHasBuildPL(names) {
+			lines = append(lines, snapshotPackage{"Module::Build", "0.38"})
+		}
 	}
 	r := &distRequirements{lines: mergeRequirements(lines)}
 	for _, line := range r.lines {
@@ -1160,8 +1180,9 @@ func mergeRequirements(lines []snapshotPackage) []snapshotPackage {
 
 // mymetaRequirements reads the configure, build and runtime "requires" of a
 // MYMETA.json: CPAN::Meta::Spec version 2 (prereqs/<phase>/requires), or
-// the version 1 keys (configure_requires, build_requires, requires).
-func mymetaRequirements(raw []byte) ([]snapshotPackage, error) {
+// the version 1 keys (configure_requires, build_requires, requires), and
+// whether it requires anything to configure.
+func mymetaRequirements(raw []byte) ([]snapshotPackage, bool, error) {
 	var meta struct {
 		Spec struct {
 			Version versionText `json:"version"`
@@ -1172,13 +1193,14 @@ func mymetaRequirements(raw []byte) ([]snapshotPackage, error) {
 		ConfigureRequires map[string]versionText                       `json:"configure_requires"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var sets []map[string]versionText
 	if v, ok := parsePerlVersion(string(meta.Spec.Version)); ok && v.compare(perlVersion{2}) >= 0 {
 		for phase := range staticPhases {
 			sets = append(sets, meta.Prereqs[phase]["requires"])
 		}
+		meta.ConfigureRequires = meta.Prereqs["configure"]["requires"]
 	} else {
 		sets = append(sets, meta.ConfigureRequires, meta.BuildRequires, meta.Requires)
 	}
@@ -1188,7 +1210,40 @@ func mymetaRequirements(raw []byte) ([]snapshotPackage, error) {
 			lines = append(lines, snapshotPackage{module, cmp.Or(string(v), "0")})
 		}
 	}
-	return lines, nil
+	return lines, len(meta.ConfigureRequires) > 0, nil
+}
+
+// moduleBuildNeeds are the distributions Module::Build depends on, which
+// cpanm configures with Makefile.PL (should_use_mm; gperl's helper.pl
+// %use_mm).
+var moduleBuildNeeds = map[string]bool{"version": true, "ExtUtils-ParseXS": true, "ExtUtils-Install": true, "ExtUtils-Manifest": true}
+
+// extractedHasBuildPL reports whether the tree gperl extracts an archive
+// with these members into has a Build.PL: gperl drops the archive's
+// top-level directory when it is the only entry at the top (internal/mod
+// fetch.go extract).
+func extractedHasBuildPL(names []string) bool {
+	members := map[string]bool{}
+	// nested says, for each top-level entry, whether anything is below it.
+	nested := map[string]bool{}
+	for _, n := range names {
+		p := path.Clean(n)
+		if p == "." {
+			continue
+		}
+		members[p] = true
+		top, _, below := strings.Cut(p, "/")
+		nested[top] = nested[top] || below
+	}
+	file := "Build.PL"
+	if len(nested) == 1 {
+		for top, below := range nested {
+			if below {
+				file = top + "/Build.PL"
+			}
+		}
+	}
+	return members[file]
 }
 
 // gperlDistFile is how gperl splits an archive's name into the
