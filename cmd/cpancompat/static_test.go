@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"debug/elf"
 	"encoding/binary"
 	"os"
@@ -294,24 +296,32 @@ func TestMymetaRequirements(t *testing.T) {
 		"runtime":{"requires":{"perl":"5.008","JSON::PP":0},"recommends":{"Cpanel::JSON::XS":"4"}},
 		"test":{"requires":{"Test::More":"0.98"}},
 		"develop":{"requires":{"Dist::Zilla":"6"}}}}`
-	got, err := mymetaRequirements([]byte(v2))
+	got, configures, err := mymetaRequirements([]byte(v2))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []snapshotPackage{{"ExtUtils::MakeMaker", "6.64"}, {"JSON::PP", "0"}, {"perl", "5.008"}}
-	if got = mergeRequirements(got); !reflect.DeepEqual(got, want) {
-		t.Errorf("version 2: %v, want %v", got, want)
+	if got = mergeRequirements(got); !reflect.DeepEqual(got, want) || !configures {
+		t.Errorf("version 2: %v, configures %v; want %v, true", got, configures, want)
 	}
 	v1 := `{"meta-spec":{"version":"1.4"},"requires":{"Moo":"2"},"build_requires":{"Module::Build":"0.4"},"configure_requires":{"Module::Build":"0.38"}}`
-	got, err = mymetaRequirements([]byte(v1))
+	got, configures, err = mymetaRequirements([]byte(v1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want = []snapshotPackage{{"Module::Build", "0.38, 0.4"}, {"Moo", "2"}}
-	if got = mergeRequirements(got); !reflect.DeepEqual(got, want) {
-		t.Errorf("version 1.4: %v, want %v", got, want)
+	if got = mergeRequirements(got); !reflect.DeepEqual(got, want) || !configures {
+		t.Errorf("version 1.4: %v, configures %v; want %v, true", got, configures, want)
 	}
-	if _, err := mymetaRequirements([]byte("{")); err == nil {
+	for _, meta := range []string{
+		`{"meta-spec":{"version":2},"prereqs":{"runtime":{"requires":{"Moo":"2"}},"configure":{"recommends":{"Foo":"1"}}}}`,
+		`{"meta-spec":{"version":"1.4"},"requires":{"Moo":"2"}}`,
+	} {
+		if _, configures, err := mymetaRequirements([]byte(meta)); err != nil || configures {
+			t.Errorf("%s: configures %v, %v; want false", meta, configures, err)
+		}
+	}
+	if _, _, err := mymetaRequirements([]byte("{")); err == nil {
 		t.Errorf("a MYMETA.json that does not parse has no error")
 	}
 }
@@ -369,8 +379,121 @@ func TestStaticTargets(t *testing.T) {
 	}
 }
 
-func TestAppArchiveAndSnapshot(t *testing.T) {
+// distArchive returns a .tar.gz archive of empty files with these names (a
+// name ending in a slash is a directory), after a pax global header as git
+// archive writes one.
+func distArchive(t *testing.T, names ...string) string {
+	t.Helper()
+	var b bytes.Buffer
+	zw := gzip.NewWriter(&b)
+	tw := tar.NewWriter(zw)
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeXGlobalHeader, Name: "pax_global_header", PAXRecords: map[string]string{"comment": "0123abcd"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		h := &tar.Header{Typeflag: tar.TypeReg, Name: name, Mode: 0o644}
+		if strings.HasSuffix(name, "/") {
+			h.Typeflag, h.Mode = tar.TypeDir, 0o755
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func TestExtractedHasBuildPL(t *testing.T) {
+	for _, tc := range []struct {
+		names []string
+		want  bool
+	}{
+		{[]string{"Foo-1/", "Foo-1/Build.PL", "Foo-1/lib/Foo.pm"}, true},
+		{[]string{"./", "./Foo-1/Build.PL", "./Foo-1/lib/Foo.pm"}, true},
+		{[]string{"Foo-1/Makefile.PL", "Foo-1/lib/Foo.pm"}, false},
+		// Below a directory that is not the only entry at the top.
+		{[]string{"Foo-1/Build.PL", "README"}, false},
+		{[]string{"Foo-1/Build.PL", "Bar/"}, false},
+		{[]string{"Build.PL", "lib/Foo.pm"}, true},
+		{[]string{"Build.PL"}, true},
+		{[]string{"Foo-1/t/Build.PL"}, false},
+	} {
+		if got := extractedHasBuildPL(tc.names); got != tc.want {
+			t.Errorf("extractedHasBuildPL(%q) = %v, want %v", tc.names, got, tc.want)
+		}
+	}
+	names, err := archiveNames("Foo-1.tar.gz", []byte(distArchive(t, "Foo-1/", "Foo-1/Build.PL")))
+	if err != nil || !reflect.DeepEqual(names, []string{"Foo-1/", "Foo-1/Build.PL"}) {
+		t.Errorf("archiveNames = %q, %v; want the members without the pax global header", names, err)
+	}
+}
+
+func TestModuleBuildConfigureRequirement(t *testing.T) {
+	dataDir := t.TempDir()
+	mk := func(name string, files []string, requires ...requirement) *dist {
+		d := &dist{Dist: name, Release: name + "-1", Path: "A/AU/AUTHOR/" + name + "-1.tar.gz", Modules: []string{name}, Requires: requires}
+		writeFiles(t, dataDir, map[string]string{"archives/" + d.Path: distArchive(t, files...)})
+		return d
+	}
+	eumm := requirement{Module: "ExtUtils::MakeMaker", Phase: "configure", Relationship: "requires"}
 	s := &staticRunner{
+		opts: staticOptions{dataDir: dataDir},
+		dists: map[string]*dist{
+			"MB":           mk("MB", []string{"MB-1/Build.PL"}),
+			"Declared":     mk("Declared", []string{"Declared-1/Build.PL"}, eumm),
+			"Recommends":   mk("Recommends", []string{"Recommends-1/Build.PL"}, requirement{Module: "Foo", Phase: "configure", Relationship: "recommends"}),
+			"MM":           mk("MM", []string{"MM-1/Makefile.PL"}),
+			"version":      mk("version", []string{"version-1/Build.PL"}),
+			"Built":        mk("Built", []string{"Built-1/Build.PL"}),
+			"BuiltNone":    mk("BuiltNone", []string{"BuiltNone-1/Build.PL"}, eumm),
+			"Module-Build": mk("Module-Build", []string{"Module-Build-1/Build.PL"}),
+			"PerlOnly":     mk("PerlOnly", []string{"PerlOnly-1/Build.PL"}, requirement{Module: "perl", Version: "5.008", Phase: "configure", Relationship: "requires"}),
+			"Corrupt":      mk("Corrupt", []string{"Corrupt-1/Build.PL"}),
+			// gperl takes no such archive, so it reads no tree of it.
+			"BadName": {Dist: "BadName", Release: "BadName-1.0-patched", Path: "A/AU/AUTHOR/BadName-1.0-patched.tar.gz", Modules: []string{"BadName"}},
+		},
+		byModule:     map[string]string{"Module::Build": "Module-Build"},
+		provided:     map[string]string{},
+		requirements: map[string]*distRequirements{}, verified: map[string]bool{}, treesDir: t.TempDir(),
+	}
+	// MYMETA.json stands in for the static metadata once a build left one.
+	writeFiles(t, s.treesDir, map[string]string{
+		"Built@1/MYMETA.json":     `{"meta-spec":{"version":2},"prereqs":{"configure":{"requires":{"Module::Build::Tiny":"0"}}}}`,
+		"BuiltNone@1/MYMETA.json": `{"meta-spec":{"version":2},"prereqs":{"runtime":{"requires":{"Moo":"0"}}}}`,
+	})
+	s.dists["Corrupt"].SHA256 = strings.Repeat("0", 64)
+	if _, err := s.requirementsOf("Corrupt"); err == nil {
+		t.Errorf("Corrupt: an archive that does not match its checksum has no error")
+	}
+	for name, want := range map[string]bool{"MB": true, "Declared": false, "Recommends": true, "MM": false, "version": false, "Built": false, "BuiltNone": true, "PerlOnly": false, "BadName": false} {
+		r, err := s.requirementsOf(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got := slices.Contains(r.lines, snapshotPackage{"Module::Build", "0.38"})
+		if got != want || got != slices.Contains(r.needs, "Module-Build") {
+			t.Errorf("%s: lines %v, needs %v; want Module::Build 0.38 %v", name, r.lines, r.needs, want)
+		}
+	}
+	// Module::Build needs no distribution but itself for it.
+	if r, err := s.requirementsOf("Module-Build"); err != nil || !slices.Contains(r.lines, snapshotPackage{"Module::Build", "0.38"}) || len(r.needs) != 0 {
+		t.Errorf("Module-Build: %+v, %v", r, err)
+	}
+}
+
+func TestAppArchiveAndSnapshot(t *testing.T) {
+	dataDir := t.TempDir()
+	writeFiles(t, dataDir, map[string]string{
+		"archives/H/HA/HAARG/Moo-2.005005.tar.gz":       distArchive(t, "Moo-2.005005/Makefile.PL"),
+		"archives/H/HA/HAARG/Role-Tiny-2.002004.tar.gz": distArchive(t, "Role-Tiny-2.002004/Makefile.PL"),
+	})
+	s := &staticRunner{
+		opts: staticOptions{dataDir: dataDir}, verified: map[string]bool{},
 		dists: map[string]*dist{
 			"Moo": {Dist: "Moo", Release: "Moo-2.005005", Path: "H/HA/HAARG/Moo-2.005005.tar.gz", Modules: []string{"Moo", "Moo::Role"},
 				Requires: []requirement{{Module: "Role::Tiny", Version: "2.002004", Phase: "runtime", Relationship: "requires", Dist: "Role-Tiny"},
@@ -472,7 +595,7 @@ func TestStaticSchedule(t *testing.T) {
 		for _, n := range needs {
 			d.Requires = append(d.Requires, requirement{Module: n, Phase: "runtime", Relationship: "requires", Dist: n})
 		}
-		writeFiles(t, archives, map[string]string{"archives/" + d.Path: "archive"})
+		writeFiles(t, archives, map[string]string{"archives/" + d.Path: distArchive(t, d.Release+"/Makefile.PL")})
 		return d
 	}
 	all := []dist{
@@ -612,7 +735,7 @@ func TestStaticForcesAStandstill(t *testing.T) {
 				{Dist: "X", Release: "X-1", Path: "A/AU/AUTHOR/X-1.tar.gz", Modules: []string{"X"}, Requires: []requirement{{Module: "Y", Phase: "runtime", Relationship: "requires", Dist: "Y"}}},
 				{Dist: "Y", Release: "Y-1", Path: "A/AU/AUTHOR/Y-1.tar.gz", Modules: []string{"Y"}, Requires: []requirement{{Module: "X", Phase: "runtime", Relationship: "requires", Dist: "X"}}},
 			}
-			writeFiles(t, archives, map[string]string{"archives/A/AU/AUTHOR/X-1.tar.gz": "x", "archives/A/AU/AUTHOR/Y-1.tar.gz": "y"})
+			writeFiles(t, archives, map[string]string{"archives/A/AU/AUTHOR/X-1.tar.gz": distArchive(t, "X-1/Makefile.PL"), "archives/A/AU/AUTHOR/Y-1.tar.gz": distArchive(t, "Y-1/Makefile.PL")})
 			s := &staticRunner{
 				opts: staticOptions{dataDir: archives, jobs: 1}, dists: map[string]*dist{"X": &all[0], "Y": &all[1]},
 				byModule: map[string]string{"X": "X", "Y": "Y"}, versions: map[string]string{}, provided: map[string]string{},

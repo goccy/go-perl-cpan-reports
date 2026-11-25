@@ -212,7 +212,7 @@ func nativeSources(name string, archive []byte) (xs []string, c int, err error) 
 }
 
 // archiveNames lists the entries of a .tar.gz, .tgz, .tar.bz2 or .zip
-// archive.
+// archive that its extraction makes.
 func archiveNames(name string, archive []byte) ([]string, error) {
 	var names []string
 	switch {
@@ -248,6 +248,12 @@ func tarNames(r io.Reader) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		names = append(names, h.Name)
+		// Only these make a file or directory when the archive is
+		// extracted (gperl's mod.ExtractTar); a pax global header, say,
+		// does not.
+		switch h.Typeflag {
+		case tar.TypeDir, tar.TypeReg, tar.TypeSymlink, tar.TypeLink:
+			names = append(names, h.Name)
+		}
 	}
 }
