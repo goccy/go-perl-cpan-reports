@@ -6,7 +6,7 @@
 than they fail on Linux, {{num $n}} of {{num $s.Snapshot.Distributions}}) is configured, built, tested and installed
 the way a CPAN client does it, in a container of its own, with everything it needs installed the same way
 before it{{if $ref}}: once with {{$sub.Label}} as the perl command, and once with {{$ref.Label}} {{$ref.Meta.Interpreter.Version}} itself
-in the same environment{{end}}. <a href="methodology.html">How it is measured</a>.</p>
+in the same environment{{end}}. <a href="methodology">How it is measured</a>.</p>
 
 <section class="tiles" aria-label="Headline numbers">
   <div class="tile">
@@ -62,7 +62,7 @@ in the same environment{{end}}. <a href="methodology.html">How it is measured</a
   <thead><tr><th>bucket</th><th class="num">distributions</th><th class="num">share</th></tr></thead>
   <tbody>
   {{- range buckets}}
-  <tr><td><span class="swatch b-{{.}}" aria-hidden="true"></span><a href="dists.html#bucket={{.}}">{{bucketTitle .}}</a></td>
+  <tr><td><span class="swatch b-{{.}}" aria-hidden="true"></span><a href="dists#bucket={{.}}">{{bucketTitle .}}</a></td>
     <td class="num">{{num (index $c.Buckets .)}}</td><td class="num">{{pct (index $c.Buckets .) $c.Distributions}}</td></tr>
   {{- end}}
   </tbody>
@@ -80,7 +80,7 @@ in the same environment{{end}}. <a href="methodology.html">How it is measured</a
   <thead><tr><th>outcome</th><th>what it means</th><th class="num">{{$sub.Label}}</th>{{if $ref}}<th class="num">{{$ref.Label}}</th>{{end}}</tr></thead>
   <tbody>
   {{- range $o := outcomes}}{{if or (index $sub.Coverage.Outcomes $o) (and $ref (index $ref.Coverage.Outcomes $o))}}
-  <tr><td><a href="dists.html#subject={{$o}}"><code>{{$o}}</code></a></td><td>{{outcomeTitle $o}}</td>
+  <tr><td><a href="dists#subject={{$o}}"><code>{{$o}}</code></a></td><td>{{outcomeTitle $o}}</td>
     <td class="num">{{num (index $sub.Coverage.Outcomes $o)}} <span class="muted">{{pct (index $sub.Coverage.Outcomes $o) $n}}</span></td>
     {{- if $ref}}<td class="num">{{num (index $ref.Coverage.Outcomes $o)}} <span class="muted">{{pct (index $ref.Coverage.Outcomes $o) $n}}</span></td>{{end}}</tr>
   {{- end}}{{end}}
@@ -100,13 +100,13 @@ in the same environment{{end}}. <a href="methodology.html">How it is measured</a
 into one binary, linked fully statically, that runs where there is nothing but the binary.
 {{- with $sub.Meta.Static}} The tests ran on {{$sub.Label}}{{with $sub.Meta.Interpreter.Version}} {{.}}{{end}}{{with $sub.Meta.Interpreter.Commit}} ({{short .}}){{end}};
 the static builds were made with gperl {{.Gperl.Main.Version}} ({{.CC}}, {{.LibC}}, {{.Go}}).{{end}}
-<a href="methodology.html#static">How it is measured</a>{{if $s.Checker}}; <a href="check.html">check a cpanfile</a>{{end}}.</p>
+<a href="methodology#static">How it is measured</a>{{if $s.Checker}}; <a href="check">check a cpanfile</a>{{end}}.</p>
 <div class="table-wrap">
 <table>
   <thead><tr><th>static build</th><th class="num">distributions</th></tr></thead>
   <tbody>
   {{- range $sub.StaticCounts}}
-  <tr><td><a href="dists.html#static={{.Category.ID}}">{{.Category.Title}}</a></td><td class="num">{{num .Count}}</td></tr>
+  <tr><td><a href="dists#static={{.Category.ID}}">{{.Category.Title}}</a></td><td class="num">{{num .Count}}</td></tr>
   {{- end}}
   </tbody>
 </table>
@@ -139,13 +139,13 @@ the distributions that were run and did not install: those that block the most o
 <h2>Causes</h2>
 <p>Why the reference distributions that did not pass on {{$sub.Label}} failed, the blocked ones left out, as the
 logs tell it{{if $s.ForkLimitation}}, or as analysis recorded it for a <a href="#known-limitations">known
-limitation</a>{{end}} (<a href="methodology.html#causes">how causes are decided</a>).</p>
+limitation</a>{{end}} (<a href="methodology#causes">how causes are decided</a>).</p>
 <div class="table-wrap">
 <table>
   <thead><tr><th>cause</th><th class="num">distributions</th>{{if $ref}}<th class="num">of them passing on {{$ref.Label}}</th>{{end}}</tr></thead>
   <tbody>
   {{- range $s.Causes}}
-  <tr><td><a href="dists.html#cause={{.Cause}}">{{causeTitle .Cause}}</a></td><td class="num">{{num .Distributions}}</td>{{if $ref}}<td class="num">{{num .ReferencePasses}}</td>{{end}}</tr>
+  <tr><td><a href="dists#cause={{.Cause}}">{{causeTitle .Cause}}</a></td><td class="num">{{num .Distributions}}</td>{{if $ref}}<td class="num">{{num .ReferencePasses}}</td>{{end}}</tr>
   {{- end}}
   </tbody>
 </table>

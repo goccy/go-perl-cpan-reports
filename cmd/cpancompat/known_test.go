@@ -202,7 +202,7 @@ func TestKnownCausesThroughExportAndSite(t *testing.T) {
 		"So native code is not available in a forked child",
 		"In run <code>sub</code>, 1 distribution failed for\nthis reason, 1 of them in the reference set:",
 		// The list of the distributions: Forky alone.
-		"<p><a href=\"d/Forky.html\">Forky</a></p>",
+		"<p><a href=\"d/Forky\">Forky</a></p>",
 	} {
 		if !strings.Contains(index, want) {
 			t.Errorf("index.html lacks %q", want)

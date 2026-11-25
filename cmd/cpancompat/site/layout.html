@@ -10,14 +10,14 @@
 </head>
 <body>
 <header class="site">
-  <a class="brand" href="{{.Root}}index.html">go-perl CPAN Reports</a>
+  <a class="brand" href="{{or .Root "./"}}">go-perl CPAN Reports</a>
   <nav>
-    <a href="{{.Root}}index.html"{{if eq .Current "index"}} aria-current="page"{{end}}>Overview</a>
-    <a href="{{.Root}}dists.html"{{if eq .Current "dists"}} aria-current="page"{{end}}>Distributions</a>
+    <a href="{{or .Root "./"}}"{{if eq .Current "index"}} aria-current="page"{{end}}>Overview</a>
+    <a href="{{.Root}}dists"{{if eq .Current "dists"}} aria-current="page"{{end}}>Distributions</a>
     {{- if .Site.Checker}}
-    <a href="{{.Root}}check.html"{{if eq .Current "check"}} aria-current="page"{{end}}>Check a cpanfile</a>
+    <a href="{{.Root}}check"{{if eq .Current "check"}} aria-current="page"{{end}}>Check a cpanfile</a>
     {{- end}}
-    <a href="{{.Root}}methodology.html"{{if eq .Current "methodology"}} aria-current="page"{{end}}>Methodology</a>
+    <a href="{{.Root}}methodology"{{if eq .Current "methodology"}} aria-current="page"{{end}}>Methodology</a>
   </nav>
   <button type="button" id="theme" class="theme" hidden></button>
 </header>
@@ -34,7 +34,7 @@
 <aside class="banner" role="note">
   <strong>Provisional results</strong>
   ({{range $i, $r := $s.Shown}}{{if $i}}, {{end}}{{$r.Label}}{{with $r.Meta.Interpreter.Commit}} {{short .}}{{end}}{{with $r.Meta.Interpreter.Version}} {{.}}{{end}}{{end}}).
-  <a href="{{.Root}}index.html">What they are</a>
+  <a href="{{or .Root "./"}}">What they are</a>
 </aside>
 {{- end}}
 {{- end}}

@@ -1,6 +1,6 @@
 {{define "content"}}
 {{- $s := .Site}}{{$v := .Dist}}
-<p class="crumbs"><a href="../dists.html">Distributions</a></p>
+<p class="crumbs"><a href="../dists">Distributions</a></p>
 <h1>{{$v.Dist}}</h1>
 <dl class="facts">
   {{- with $v.Ref}}
@@ -40,7 +40,7 @@
   <dt>cause</dt><dd>{{causeTitle .Cause}}</dd>
   {{- with $known}}
   <dt>analysis</dt><dd>{{.Evidence}} Attributed test files: {{range $i, $f := .Tests}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}}.
-    <a href="../index.html#known-limitations">About this limitation</a></dd>
+    <a href="../#known-limitations">About this limitation</a></dd>
   {{- end}}
   {{- if .BlockedBy}}
   <dt>blocked by</dt><dd>{{range $i, $d := .BlockedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
@@ -141,7 +141,7 @@
 <pre class="log">{{.Text}}</pre>
 {{- end}}
 <p class="muted">A program that loads its modules, built by gperl into one binary with everything it needs, linked fully
-statically, and run where there is nothing but the binary. <a href="../methodology.html#static">How it is measured</a>.</p>
+statically, and run where there is nothing but the binary. <a href="../methodology#static">How it is measured</a>.</p>
 {{- end}}
 </section>
 {{- end}}

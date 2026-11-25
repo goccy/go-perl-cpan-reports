@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,14 +12,18 @@ import (
 )
 
 func TestPageNames(t *testing.T) {
-	pages := pageNames(map[string]bool{"Moose": true, "Text-Tabs+Wrap": true, "Alien-Xmake": true, "Alien-xmake": true, "LMDB_File": true})
-	if pages["Moose"] != "Moose" || pages["LMDB_File"] != "LMDB_File" {
+	pages := pageNames(map[string]bool{"Moose": true, "Text-Tabs+Wrap": true, "Alien-Xmake": true, "Alien-xmake": true, "LMDB_File": true,
+		"new.spirit": true, "Foo": true, "Foo.html": true, "Bar.HTML": true})
+	if pages["Moose"] != "Moose" || pages["LMDB_File"] != "LMDB_File" || pages["new.spirit"] != "new.spirit" || pages["Foo"] != "Foo" {
 		t.Errorf("plain names changed: %v", pages)
 	}
 	seen := map[string]string{}
 	for name, p := range pages {
 		if !plainDistName.MatchString(strings.ReplaceAll(p, "~", "-")) {
 			t.Errorf("page of %q is %q", name, p)
+		}
+		if strings.HasSuffix(strings.ToLower(p), ".html") {
+			t.Errorf("page of %q ends in .html: %q", name, p)
 		}
 		lower := strings.ToLower(p)
 		if other, dup := seen[lower]; dup {
@@ -128,7 +135,8 @@ func TestGenerateSite(t *testing.T) {
 		"Provisional results.", "a &lt;trial&gt; run",
 		"<div class=\"value\">33.3%</div>", // 1 of 3 passes on go-perl
 		"<div class=\"value\">100.0%</div>",
-		`href="d/Dep.html"`, // what blocks the most
+		`href="d/Dep"`, // what blocks the most
+		`href="./"`, `href="dists"`, `href="methodology"`,
 		`<script src="assets/theme.js" defer></script>`, `<button type="button" id="theme" class="theme" hidden></button>`,
 	} {
 		if !strings.Contains(index, want) {
@@ -146,13 +154,33 @@ func TestGenerateSite(t *testing.T) {
 			t.Errorf("d/Evil.html lacks %q", want)
 		}
 	}
-	for _, rel := range []string{`href="../assets/style.css"`, `src="../assets/theme.js"`, `href="../index.html"`} {
+	for _, rel := range []string{`href="../assets/style.css"`, `src="../assets/theme.js"`, `href="../"`, `href="../dists"`} {
 		if !strings.Contains(evil, rel) {
 			t.Errorf("d/Evil.html lacks the relative link %s", rel)
 		}
 	}
 	if strings.Contains(index+evil, `href="/`) || strings.Contains(index+evil, `src="/`) {
 		t.Errorf("a page links by an absolute path")
+	}
+	// The templates and scripts themselves, so that every branch of them
+	// is looked at.
+	err := fs.WalkDir(siteFiles, "site", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := fs.ReadFile(siteFiles, name)
+		if err != nil {
+			return err
+		}
+		for _, link := range []string{`.html"`, `.html#`} {
+			if strings.Contains(string(raw), link) {
+				t.Errorf("%s links to a path with .html (%s)", name, link)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var table distTable
@@ -176,5 +204,52 @@ func TestGenerateSite(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+func TestSiteHandler(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "site")
+	writeFiles(t, parent, map[string]string{
+		"secret.html":                           "secret",
+		"site/index.html":                       "overview",
+		"site/check.html":                       "checker",
+		"site/dists.json":                       "table",
+		"site/assets/style.css":                 "css",
+		"site/d/Moose.html":                     "moose",
+		"site/d/new.spirit.html":                "new.spirit",
+		"site/d/Text-Tabs_Wrap~0123456789.html": "tabs",
+	})
+	h := siteHandler(os.DirFS(root))
+	for _, c := range []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{"/", http.StatusOK, "overview"},
+		{"/check", http.StatusOK, "checker"},
+		{"/check.html", http.StatusOK, "checker"},
+		{"/index", http.StatusOK, "overview"},
+		{"/dists.json", http.StatusOK, "table"},
+		{"/assets/style.css", http.StatusOK, "css"},
+		{"/d/Moose", http.StatusOK, "moose"},
+		{"/d/new.spirit", http.StatusOK, "new.spirit"},
+		{"/d/Text-Tabs_Wrap~0123456789", http.StatusOK, "tabs"},
+		{"/missing", http.StatusNotFound, ""},
+		{"/check/", http.StatusNotFound, ""},
+		{"/d/Moose/", http.StatusNotFound, ""},
+		{"/../secret", http.StatusNotFound, ""},
+		{"/d/../../secret", http.StatusNotFound, ""},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://localhost"+c.path, nil))
+		if rec.Code != c.status || c.status == http.StatusOK && rec.Body.String() != c.body {
+			t.Errorf("GET %s: %d %q, want %d %q", c.path, rec.Code, rec.Body.String(), c.status, c.body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://localhost/index.html", nil))
+	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "./" {
+		t.Errorf("GET /index.html: %d, Location %q", rec.Code, rec.Header().Get("Location"))
 	}
 }

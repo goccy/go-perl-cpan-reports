@@ -17,11 +17,13 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -204,9 +206,10 @@ var plainDistName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // pageNames gives each distribution the name of its page: the
 // distribution's own name, unless it has characters other than letters,
-// digits, dots, hyphens and underscores, or differs only in case from
-// another's (the site must work on a case-insensitive file system); then
-// its name with those characters replaced, and part of a hash of the name.
+// digits, dots, hyphens and underscores, ends in .html (a page is linked
+// without .html), or differs only in case from another's (the site must
+// work on a case-insensitive file system); then its name with those
+// characters replaced, and part of a hash of the name.
 func pageNames(names map[string]bool) map[string]string {
 	folded := map[string]int{}
 	for name := range names {
@@ -214,7 +217,8 @@ func pageNames(names map[string]bool) map[string]string {
 	}
 	pages := make(map[string]string, len(names))
 	for name := range names {
-		if plainDistName.MatchString(name) && folded[strings.ToLower(name)] == 1 {
+		lower := strings.ToLower(name)
+		if plainDistName.MatchString(name) && !strings.HasSuffix(lower, ".html") && folded[lower] == 1 {
 			pages[name] = name
 			continue
 		}
@@ -508,7 +512,7 @@ func siteTemplates(s *siteData) (map[string]*template.Template, error) {
 		"bucketCount":  func(name string) int { return s.Comparison.Buckets[bucket(name)] },
 		"page": func(name string) string {
 			if p, ok := s.pages[name]; ok {
-				return p + ".html"
+				return p
 			}
 			return ""
 		},
@@ -620,5 +624,29 @@ func formatDateRange(first, last string) string {
 // serveSite serves the directory dir at addr until the process ends.
 func serveSite(dir, addr string) error {
 	fmt.Fprintf(os.Stderr, "serving %s at http://%s/\n", dir, addr)
-	return http.ListenAndServe(addr, http.FileServer(http.Dir(dir)))
+	return http.ListenAndServe(addr, siteHandler(os.DirFS(dir)))
+}
+
+// siteHandler serves the site in fsys as GitHub Pages does: a page is
+// served at its path without .html. A path not ending in a slash is
+// served <path>.html when that is a file, and as it is otherwise; no page
+// name ends in .html, so the two never both exist.
+func siteHandler(fsys fs.FS) http.Handler {
+	files := http.FileServerFS(fsys)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/") {
+			name := strings.TrimPrefix(path.Clean(r.URL.Path), "/") + ".html"
+			fi, err := fs.Stat(fsys, name)
+			if err == nil && fi.Mode().IsRegular() {
+				http.ServeFileFS(w, r, fsys, name)
+				return
+			}
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				// The path is served as it is, and the file server
+				// answers for what it finds there.
+				fmt.Fprintf(os.Stderr, "%q\n", err.Error())
+			}
+		}
+		files.ServeHTTP(w, r)
+	})
 }
