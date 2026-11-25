@@ -296,7 +296,7 @@ func TestMymetaRequirements(t *testing.T) {
 		"runtime":{"requires":{"perl":"5.008","JSON::PP":0},"recommends":{"Cpanel::JSON::XS":"4"}},
 		"test":{"requires":{"Test::More":"0.98"}},
 		"develop":{"requires":{"Dist::Zilla":"6"}}}}`
-	got, configures, err := mymetaRequirements([]byte(v2))
+	got, configures, err := mymetaRequirements([]byte(v2), staticPhases)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,8 +304,13 @@ func TestMymetaRequirements(t *testing.T) {
 	if got = mergeRequirements(got); !reflect.DeepEqual(got, want) || !configures {
 		t.Errorf("version 2: %v, configures %v; want %v, true", got, configures, want)
 	}
+	// A target's tests need the test phase's requirements too.
+	got, _, err = mymetaRequirements([]byte(v2), testPhases)
+	if want := []snapshotPackage{{"ExtUtils::MakeMaker", "6.64"}, {"JSON::PP", "0"}, {"Test::More", "0.98"}, {"perl", "5.008"}}; err != nil || !reflect.DeepEqual(mergeRequirements(got), want) {
+		t.Errorf("version 2 with the test phase: %v, %v; want %v", mergeRequirements(got), err, want)
+	}
 	v1 := `{"meta-spec":{"version":"1.4"},"requires":{"Moo":"2"},"build_requires":{"Module::Build":"0.4"},"configure_requires":{"Module::Build":"0.38"}}`
-	got, configures, err = mymetaRequirements([]byte(v1))
+	got, configures, err = mymetaRequirements([]byte(v1), staticPhases)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,11 +322,11 @@ func TestMymetaRequirements(t *testing.T) {
 		`{"meta-spec":{"version":2},"prereqs":{"runtime":{"requires":{"Moo":"2"}},"configure":{"recommends":{"Foo":"1"}}}}`,
 		`{"meta-spec":{"version":"1.4"},"requires":{"Moo":"2"}}`,
 	} {
-		if _, configures, err := mymetaRequirements([]byte(meta)); err != nil || configures {
+		if _, configures, err := mymetaRequirements([]byte(meta), staticPhases); err != nil || configures {
 			t.Errorf("%s: configures %v, %v; want false", meta, configures, err)
 		}
 	}
-	if _, _, err := mymetaRequirements([]byte("{")); err == nil {
+	if _, _, err := mymetaRequirements([]byte("{"), staticPhases); err == nil {
 		t.Errorf("a MYMETA.json that does not parse has no error")
 	}
 }
@@ -498,15 +503,27 @@ func TestAppArchiveAndSnapshot(t *testing.T) {
 			"Moo": {Dist: "Moo", Release: "Moo-2.005005", Path: "H/HA/HAARG/Moo-2.005005.tar.gz", Modules: []string{"Moo", "Moo::Role"},
 				Requires: []requirement{{Module: "Role::Tiny", Version: "2.002004", Phase: "runtime", Relationship: "requires", Dist: "Role-Tiny"},
 					{Module: "Test::Fatal", Phase: "test", Relationship: "requires", Dist: "Test-Fatal"}}},
-			"Role-Tiny": {Dist: "Role-Tiny", Release: "Role-Tiny-2.002004", Path: "H/HA/HAARG/Role-Tiny-2.002004.tar.gz", Modules: []string{"Role::Tiny"}},
+			"Role-Tiny": {Dist: "Role-Tiny", Release: "Role-Tiny-2.002004", Path: "H/HA/HAARG/Role-Tiny-2.002004.tar.gz", Modules: []string{"Role::Tiny"},
+				Requires: []requirement{{Module: "Test::Fatal", Phase: "test", Relationship: "requires", Dist: "Test-Fatal"}}},
+			"Test-Fatal": {Dist: "Test-Fatal", Release: "Test-Fatal-0.017", Path: "R/RJ/RJBS/Test-Fatal-0.017.tar.gz", Modules: []string{"Test::Fatal"}},
 		},
 		byModule: map[string]string{"Moo": "Moo", "Moo::Role": "Moo", "Role::Tiny": "Role-Tiny", "Test::Fatal": "Test-Fatal"},
-		versions: map[string]string{"Moo": "2.005005", "Moo::Role": "undef", "Role::Tiny": "2.002004"},
-		provided: map[string]string{}, requirements: map[string]*distRequirements{}, treesDir: t.TempDir(),
+		versions: map[string]string{"Moo": "2.005005", "Moo::Role": "undef", "Role::Tiny": "2.002004", "Test::Fatal": "0.017"},
+		provided: map[string]string{}, requirements: map[string]*distRequirements{}, testRequirements: map[string]*distRequirements{},
+		treesDir: t.TempDir(),
 	}
 	closure, err := s.closure(&staticNode{d: s.dists["Moo"]})
 	if err != nil || !reflect.DeepEqual(closure, []string{"Moo", "Role-Tiny"}) {
 		t.Fatalf("closure = %v, %v (test requirements are not part of it)", closure, err)
+	}
+	// The test binary's closure has the target's own test requirements,
+	// not those of what it needs.
+	if c, tests, err := s.closures(&staticNode{d: s.dists["Moo"], target: true}); err != nil || !reflect.DeepEqual(c, closure) ||
+		!reflect.DeepEqual(tests, []string{"Moo", "Role-Tiny", "Test-Fatal"}) {
+		t.Errorf("closures = %v, %v, %v", c, tests, err)
+	}
+	if _, tests, err := s.closures(&staticNode{d: s.dists["Role-Tiny"]}); err != nil || tests != nil {
+		t.Errorf("a dependency's test closure = %v, %v", tests, err)
 	}
 	snap, err := s.snapshotOf(closure)
 	if err != nil {
@@ -548,11 +565,16 @@ type fakeStatic struct {
 	seen   map[string]bool
 	// blockedBy is what a blocked container names.
 	blockedBy map[string][]string
+	// jobs are the last job of each distribution.
+	jobs map[string]*staticJob
 }
 
 func (f *fakeStatic) attempt(job *staticJob) (*staticRecord, []string) {
 	n := job.n
 	f.order = append(f.order, n.d.Dist)
+	if f.jobs != nil {
+		f.jobs[n.d.Dist] = job
+	}
 	f.starts[n.d.Dist] = append(f.starts[n.d.Dist], strings.Join(job.closure, ","))
 	// With one job at a time the coordinator waits for this one: the nodes
 	// can be read here.
@@ -615,7 +637,7 @@ func TestStaticSchedule(t *testing.T) {
 		opts: staticOptions{dataDir: archives, jobs: 1}, dists: map[string]*dist{}, byModule: map[string]string{},
 		versions: map[string]string{}, provided: map[string]string{}, targets: map[string]bool{},
 		previous: map[string]*staticRecord{}, nodes: map[string]*staticNode{}, waiters: map[string][]*staticNode{},
-		requirements: map[string]*distRequirements{}, verified: map[string]bool{},
+		requirements: map[string]*distRequirements{}, verified: map[string]bool{}, testRequirements: map[string]*distRequirements{},
 		treesDir: t.TempDir(),
 	}
 	for i := range all {
@@ -740,7 +762,7 @@ func TestStaticForcesAStandstill(t *testing.T) {
 				opts: staticOptions{dataDir: archives, jobs: 1}, dists: map[string]*dist{"X": &all[0], "Y": &all[1]},
 				byModule: map[string]string{"X": "X", "Y": "Y"}, versions: map[string]string{}, provided: map[string]string{},
 				targets: map[string]bool{"X": true, "Y": true}, previous: map[string]*staticRecord{},
-				nodes: map[string]*staticNode{}, waiters: map[string][]*staticNode{}, requirements: map[string]*distRequirements{},
+				nodes: map[string]*staticNode{}, waiters: map[string][]*staticNode{}, requirements: map[string]*distRequirements{}, testRequirements: map[string]*distRequirements{},
 				verified: map[string]bool{}, treesDir: t.TempDir(),
 			}
 			openRecords(t, s)

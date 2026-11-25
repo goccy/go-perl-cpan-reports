@@ -172,6 +172,14 @@ such a binary of a program that uses the distribution runs where there is nothin
   nor shared libraries (<code>DT_NEEDED</code>), as its ELF headers tell.</li>
   <li><strong>It runs</strong> in an empty container. {{.Environment}} A binary that fails there is run again in the
   build environment, which tells a binary that needs something of its environment from one that does not load.</li>
+  <li><strong>Its tests</strong>, for a binary that ran: gperl builds the distribution's own test binary
+  (<code>gperl test -c</code>), which carries the distribution's tree as gperl extracted it and its dependencies with its
+  test requirements, built and linked as above. The test files the run's harness reported on run with it, one at a time,
+  in the empty container, with the environment <code>make test</code> gives them and the run's test time limit. When
+  they fail there, the same binary runs in the build environment, and then the same files run on the same project with
+  <code>gperl test</code>: that tells tests that need their environment, failures of the static binary, and failures of
+  every way gperl runs them, which passed under <code>make test</code>. A binary that runs out of time is told blocked,
+  spinning or slow by what its processes were doing 15 seconds before the limit.</li>
 </ol>
 <p>The libraries a program links, beyond the C runtime, are its <strong>external libraries</strong>: the libraries
 each native module's link named (gperl keeps its <code>-l</code> flags in the module's <code>.ldflags</code>) and the

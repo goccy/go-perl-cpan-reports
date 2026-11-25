@@ -111,6 +111,20 @@ the static builds were made with gperl {{.Gperl.Main.Version}} ({{.CC}}, {{.LibC
   </tbody>
 </table>
 </div>
+{{- if $sub.StaticTestCounts}}
+<p>For each static one: whether its own test files, which passed in the run, pass with its test binary
+(<code>gperl test -c</code>) where there is nothing but the binary, or why they did not run.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>tests with the test binary, or why they did not run</th><th class="num">distributions</th></tr></thead>
+  <tbody>
+  {{- range $sub.StaticTestCounts}}
+  <tr><td>{{.Category.Title}}</td><td class="num">{{num .Count}}</td></tr>
+  {{- end}}
+  </tbody>
+</table>
+</div>
+{{- end}}
 </section>
 {{- end}}
 

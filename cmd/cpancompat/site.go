@@ -78,6 +78,9 @@ type siteRun struct {
 	// StaticCounts counts the distributions by how their static build
 	// went; empty when the run has no static build phase.
 	StaticCounts []staticCount
+	// StaticTestCounts counts them by how their tests went with their
+	// test binaries; empty when no tests ran so.
+	StaticTestCounts []staticCount
 }
 
 // siteData is everything the pages are made from.
@@ -134,6 +137,7 @@ func buildSiteData(p *published) (*siteData, error) {
 		}
 		r.Coverage = coverageOn(p.set, pr.data)
 		r.StaticCounts = staticCounts(r, s.inSet)
+		r.StaticTestCounts = staticTestCounts(r, s.inSet)
 		for _, res := range pr.data.latest {
 			for _, b := range res.BlockedBy {
 				r.blocks[b] = append(r.blocks[b], res.Dist)

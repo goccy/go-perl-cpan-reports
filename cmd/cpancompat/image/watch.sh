@@ -1,5 +1,6 @@
 #!/bin/bash
 # watch.sh <parent pid> <limit seconds> <log> <max log bytes> <out prefix>
+# watch.sh snapshot
 #
 # Watches one phase of dist.sh (the /usr/bin/timeout process that is a
 # child of <parent pid>) until dist.sh stops it with SIGTERM:
@@ -14,6 +15,11 @@
 #   wait in, its arguments and its descriptors. A process that waits and
 #   used no CPU is blocked; one that used CPU while its test made no
 #   progress is spinning.
+#
+# "snapshot" writes only that record, at once, to standard output: for a
+# container watched from beside it, by a container that shares its
+# processes (cpancompat static, whose test binaries run where there is no
+# shell).
 #
 # Written by the shell on purpose, like dist.sh: it must not depend on the
 # perl under measurement.
@@ -106,6 +112,11 @@ processes() {
         echo "$line"
     done
 }
+
+if [ "$parent" = snapshot ]; then
+    processes
+    exit 0
+fi
 
 start=$SECONDS
 snapshot_at=$(( limit > 30 ? limit - 15 : limit ))
