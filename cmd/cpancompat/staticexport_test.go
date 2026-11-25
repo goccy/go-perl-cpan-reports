@@ -99,7 +99,7 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 	if needy := read("d/Needy.html"); !strings.Contains(needy, "Not static: "+staticReasonTitles[reasonNeedsEnvironment]) || !strings.Contains(needy, "/etc/needy.conf") {
 		t.Errorf("d/Needy.html:\n%s", needy)
 	}
-	if index := read("index.html"); !strings.Contains(index, "Static builds") || !strings.Contains(index, `href="dists.html#static=static%3abundles_system_libraries"`) ||
+	if index := read("index.html"); !strings.Contains(index, "Static builds") || !strings.Contains(index, `href="dists#static=static%3abundles_system_libraries"`) ||
 		!strings.Contains(index, "The tests ran on go-perl v0.3.0 (c0ffee);\nthe static builds were made with gperl v0.3.1") ||
 		!strings.Contains(index, "made with gperl v0.3.1, 2026-01-03") {
 		t.Errorf("index.html has no static build counts")
@@ -107,7 +107,7 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 	if m := read("methodology.html"); !strings.Contains(m, `id="static"`) || !strings.Contains(m, `id="checker"`) {
 		t.Errorf("methodology.html lacks the static build or the checker")
 	}
-	if !strings.Contains(read("check.html"), `src="assets/cpanfile.js"`) || !strings.Contains(read("index.html"), `href="check.html"`) {
+	if !strings.Contains(read("check.html"), `src="assets/cpanfile.js"`) || !strings.Contains(read("index.html"), `href="check"`) {
 		t.Errorf("no checker page or link")
 	}
 	var table distTable

@@ -116,7 +116,7 @@ this is done by the patterns of their messages:</p>
   no message, so for those failures it is given by analysis instead: the repository records, for each distribution,
   the test files the analysis tied to it and the evidence (<code>cmd/cpancompat/known-causes.json</code>). In a
   go-perl run, a distribution whose tests failed takes that cause when every test file that failed is one of those;
-  otherwise the cause its log tells stands. Runs of perl itself never take it from that file.{{if $s.ForkLimitation}} <a href="index.html#known-limitations">The known
+  otherwise the cause its log tells stands. Runs of perl itself never take it from that file.{{if $s.ForkLimitation}} <a href="./#known-limitations">The known
   limitations</a>.{{end}}</li>
   <li>Every distribution gets a cause; when nothing above applies, it is <em>not analysed</em>.</li>
 </ol>
@@ -200,7 +200,7 @@ each build container with <code>--cpus {{.CPUs}} --memory {{.Memory}}</code>, on
 {{- if $s.Checker}}
 <section id="checker">
 <h2>The cpanfile checker</h2>
-<p><a href="check.html">The checker</a> reads a <code>cpanfile</code> (and a <code>cpanfile.snapshot</code>) in the
+<p><a href="check">The checker</a> reads a <code>cpanfile</code> (and a <code>cpanfile.snapshot</code>) in the
 browser, without sending it anywhere. It does not run the cpanfile as Perl: it reads the statements of its usual
 forms (<code>requires</code>, <code>on '…' =&gt; sub { … }</code>, <code>feature</code>, the phase-named forms such as
 <code>test_requires</code>) whose arguments are plain strings or numbers, and lists every line it could not read. As

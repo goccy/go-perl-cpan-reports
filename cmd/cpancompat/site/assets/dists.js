@@ -144,7 +144,7 @@
       var tr = document.createElement("tr");
       var td = document.createElement("td");
       var a = document.createElement("a");
-      a.href = "d/" + encodeURIComponent(r[7] || r[0]) + ".html";
+      a.href = "d/" + encodeURIComponent(r[7] || r[0]);
       a.textContent = r[0];
       td.appendChild(a);
       tr.appendChild(td);

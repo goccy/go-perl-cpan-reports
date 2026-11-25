@@ -30,7 +30,7 @@
     if (!dist) return el("span", "");
     if (!dist.page) return el("span", dist.release);
     var a = el("a", dist.release);
-    a.href = "d/" + encodeURIComponent(dist.page) + ".html";
+    a.href = "d/" + encodeURIComponent(dist.page);
     return a;
   }
 
