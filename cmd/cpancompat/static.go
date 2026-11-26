@@ -174,8 +174,9 @@ const (
 	loadLimit = 120 * time.Second
 	// loadMemory is the memory of that container, the survey's.
 	loadMemory = "1500m"
-	// loadTmpfs is the writable /tmp it gets.
-	loadTmpfs = "/tmp:rw,size=1g,mode=1777"
+	// loadTmpfs is the writable /tmp it gets, where programs may run as
+	// they may in a /tmp on disk (a docker tmpfs is noexec unless told).
+	loadTmpfs = "/tmp:rw,exec,size=1g,mode=1777"
 	// loadUser is the user the binary runs as there.
 	loadUser = "65534:65534"
 )
@@ -673,7 +674,7 @@ func (s *staticRunner) buildArgs(binVolume string, offlineGo bool) []string {
 		"-v", s.archives + ":/archives:ro",
 		"--tmpfs", "/opt/gperl/mod/cache/sdk:rw,mode=1777",
 		"--tmpfs", "/opt/gperl/mod/cache/linkset:rw,mode=1777",
-		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,mode=1777",
+		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,exec,mode=1777",
 	}
 	if offlineGo {
 		// The Go modules every program needs are in the cache image's
@@ -2205,7 +2206,7 @@ func (s *staticRunner) testOutcome(job *staticJob, name, volume, dir string, rec
 	dynamic.phase, dynamic.input = "test_dynamic", job.input
 	dynamic.mounts = []string{"-v", s.modVolume + ":/opt/gperl/mod",
 		"--tmpfs", "/opt/gperl/mod/cache/sdk:rw,mode=1777", "--tmpfs", "/opt/gperl/mod/cache/linkset:rw,mode=1777",
-		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,mode=1777"}
+		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,exec,mode=1777"}
 	dynamic.argv = []string{"xvfb-run", "-a", "bash", "/opt/cpancompat/static.sh", "test-dynamic", job.own}
 	for _, c := range []struct {
 		r     binaryRun
