@@ -27,11 +27,12 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 	}, nil)
 	statics := []staticRecord{
 		{Dist: "Good", Release: "Good-1", State: staticStatic, Loaded: []string{"Good"}, Closure: []string{"Good"},
-			Binary: &binaryInfo{Bytes: 41000000, Needed: []string{}}, Finished: "2026-01-03T00:00:00Z"},
+			Binary: &binaryInfo{Bytes: 41000000, Needed: []string{}}, Finished: "2026-01-03T00:00:00Z",
+			Test: &staticTest{State: testNeedsEnvironment, Files: 7}},
 		{Dist: "Net-SSLeay", Release: "Net-SSLeay-1.94", State: staticStatic, Reason: reasonBundlesSystemLibraries,
 			Closure: []string{"Good", "Net-SSLeay"}, NativeModules: []staticNative{{"Net::SSLeay", "Net-SSLeay"}},
 			ExternalLibs: []externalLib{{Name: "ssl", Dist: "Net-SSLeay", From: "system", StaticArchive: true}, {Name: "crypto", Dist: "Net-SSLeay", From: "system", StaticArchive: true}},
-			Finished:     "2026-01-03T00:00:01Z"},
+			Finished:     "2026-01-03T00:00:01Z", Test: &staticTest{State: testPass, Files: 3}},
 		{Dist: "Needy", Release: "Needy-1", State: staticNotStatic, Reason: reasonNeedsEnvironment, Closure: []string{"Needy"},
 			Phases:   []phaseRecord{{Phase: "modules"}, {Phase: "link"}, {Phase: "run_empty", Status: 1}, {Phase: "run_control"}},
 			Finished: "2026-01-03T00:00:02Z"},
@@ -45,6 +46,7 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 		"runs/sub/static-invocations.jsonl":         `{"started":"2026-01-03T00:00:00Z","image":"s","platform":"linux/arm64","harness":{"module":"m"},"jobs":4,"cpus":"2","memory":"4g","wall_seconds":3600}` + "\n",
 		"runs/sub/static/probe/gperl.json":          `{"Path":"github.com/goccy/go-perl/cmd/gperl","Main":{"Path":"github.com/goccy/go-perl","Version":"v0.3.1","Sum":"h1:x"},"GoVersion":"go1.26.4"}`,
 		"runs/sub/static/probe/versions.json":       `{"cc":"gcc 12.2.0","libc":"glibc 2.36","go":"go1.26.4"}`,
+		"runs/sub/static/dists/Good/test_empty.log": "t/env.t .. Failed 1/1 subtests\n",
 		"runs/sub/static/dists/Needy/run_empty.log": "load.pl: Needy: cannot open /etc/needy.conf at " + data + "/x line 1.\n",
 	})
 	results := filepath.Join(t.TempDir(), "results")
@@ -71,6 +73,9 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 		len(pr.meta.Static.Invocations) != 1 || pr.provided["strict"] != "1.13" {
 		t.Fatalf("published run: static %d, meta %+v, provided %v", len(pr.static), pr.meta.Static, pr.provided)
 	}
+	if ex := pr.staticLogs["Good"]; ex == nil || ex.Log != "test_empty.log" {
+		t.Errorf("Good's log: %+v", ex)
+	}
 	ex := pr.staticLogs["Needy"]
 	if ex == nil || ex.Log != "run_empty.log" || strings.Contains(ex.Text, data) {
 		t.Errorf("Needy's log: %+v", ex)
@@ -96,6 +101,10 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 			t.Errorf("d/Net-SSLeay.html lacks %q", want)
 		}
 	}
+	if good := read("d/Good.html"); !strings.Contains(good, "<dt>tests</dt><dd>Tests fail with the binary alone, and pass with it in the build environment; 7 test files</dd>") ||
+		!strings.Contains(good, "t/env.t .. Failed 1/1 subtests") {
+		t.Errorf("d/Good.html has not how its tests went:\n%s", good)
+	}
 	if needy := read("d/Needy.html"); !strings.Contains(needy, "Not static: "+staticReasonTitles[reasonNeedsEnvironment]) || !strings.Contains(needy, "/etc/needy.conf") {
 		t.Errorf("d/Needy.html:\n%s", needy)
 	}
@@ -103,6 +112,10 @@ func TestStaticThroughExportAndSite(t *testing.T) {
 		!strings.Contains(index, "The tests ran on go-perl v0.3.0 (c0ffee);\nthe static builds were made with gperl v0.3.1") ||
 		!strings.Contains(index, "made with gperl v0.3.1, 2026-01-03") {
 		t.Errorf("index.html has no static build counts")
+	}
+	if index := read("index.html"); !strings.Contains(index, "tests with the test binary, or why they did not run") ||
+		!strings.Contains(index, "<tr><td>Tests pass with the binary alone</td><td class=\"num\">1</td></tr>") {
+		t.Errorf("index.html has no counts of the tests with the test binary")
 	}
 	if m := read("methodology.html"); !strings.Contains(m, `id="static"`) || !strings.Contains(m, `id="checker"`) {
 		t.Errorf("methodology.html lacks the static build or the checker")

@@ -188,11 +188,22 @@ func latestStatic(rows []staticRecord) []*staticRecord {
 }
 
 // staticLogOf names the log that tells why a distribution is not static:
-// the one of the phase its reason is about; "" when no log tells more than
-// the record.
+// the one of the phase its reason is about; for a static one, the one that
+// tells why its tests did not pass with its test binary; "" when no log
+// tells more than the record.
 func staticLogOf(rec *staticRecord) string {
 	if rec.State == staticDriverFailed {
 		return "container.log"
+	}
+	if rec.State == staticStatic && rec.Test != nil {
+		switch rec.Test.State {
+		case testDepsFailed:
+			return "test_modules.log"
+		case testLinkFailed:
+			return "test_link.log"
+		case testNeedsEnvironment, testStaticFailed, testDiffersFromMakeTest, testTimeout:
+			return "test_empty.log"
+		}
 	}
 	if rec.State != staticNotStatic && rec.State != staticDependency {
 		return ""
@@ -225,10 +236,16 @@ func readPublishedStatic(dir string) (map[string]*staticRecord, map[string]*logE
 	for _, c := range staticCategories() {
 		known[c.ID] = true
 	}
+	for _, c := range staticTestCategories() {
+		known[c.ID] = true
+	}
 	for i := range rows {
 		r := &rows[i]
 		if id := staticCategoryOf(r); id != "" && !known[id] || id == "" && r.State != staticDependency {
 			return nil, nil, fmt.Errorf("%s: %s: unknown state %q, reason %q", staticGzFile, r.Dist, r.State, r.Reason)
+		}
+		if id := staticTestCategoryOf(r); id != "" && !known[id] {
+			return nil, nil, fmt.Errorf("%s: %s: unknown test state %q", staticGzFile, r.Dist, r.Test.State)
 		}
 		records[r.Dist] = r
 	}
@@ -307,11 +324,38 @@ func staticCategoryOf(rec *staticRecord) string {
 	return ""
 }
 
+// staticTestCategories lists how a static target's own tests went with its
+// test binary, in the order they are presented.
+func staticTestCategories() []staticCategory {
+	return []staticCategory{
+		{"test:" + testPass, "Tests pass with the binary alone"},
+		{"test:" + testNeedsEnvironment, "Tests fail with the binary alone, and pass with it in the build environment"},
+		{"test:" + testStaticFailed, "Tests fail with the binary, and pass with gperl test"},
+		{"test:" + testDiffersFromMakeTest, "Tests fail with the binary and with gperl test (they passed under make test)"},
+		{"test:" + testTimeout, "Tests ran out of time with the binary alone"},
+		{"test:" + testDepsFailed, "Tests not run: a distribution only they need did not build"},
+		{"test:" + testLinkFailed, "Tests not run: gperl test -c did not build the test binary"},
+		{"test:" + testNoRecord, "Tests not run: the run recorded no test files"},
+	}
+}
+
+// staticTestCategoryOf returns the ID of the test group of a record, "" when
+// its tests did not run with a test binary.
+func staticTestCategoryOf(rec *staticRecord) string {
+	if rec == nil || rec.Test == nil {
+		return ""
+	}
+	return "test:" + rec.Test.State
+}
+
 // staticView is what a distribution's page shows of its static build.
 type staticView struct {
 	Rec      *staticRecord
 	Category staticCategory
-	Log      *logExcerpt
+	// Test is the group of how its tests went with its test binary; nil
+	// when they did not run.
+	Test *staticCategory
+	Log  *logExcerpt
 	// Libraries are the external libraries' names, once each.
 	Libraries []string
 }
@@ -328,6 +372,11 @@ func staticViewOf(r *siteRun, name string) *staticView {
 	for _, c := range staticCategories() {
 		if c.ID == id {
 			v.Category = c
+		}
+	}
+	for _, c := range staticTestCategories() {
+		if c.ID == staticTestCategoryOf(rec) {
+			v.Test = &c
 		}
 	}
 	for _, l := range rec.ExternalLibs {
@@ -347,14 +396,27 @@ type staticCount struct {
 // staticCounts counts the measured distributions of the reference set by
 // group, in the order of staticCategories, leaving out empty groups.
 func staticCounts(r *siteRun, inSet map[string]*refDist) []staticCount {
+	return countStatic(r, inSet, staticCategoryOf, staticCategories())
+}
+
+// staticTestCounts counts the distributions of the reference set whose tests
+// ran with a test binary by how they went, in the order of
+// staticTestCategories, leaving out empty groups.
+func staticTestCounts(r *siteRun, inSet map[string]*refDist) []staticCount {
+	return countStatic(r, inSet, staticTestCategoryOf, staticTestCategories())
+}
+
+// countStatic counts the records of the reference set by the group of
+// groups that of gives them.
+func countStatic(r *siteRun, inSet map[string]*refDist, of func(*staticRecord) string, groups []staticCategory) []staticCount {
 	n := map[string]int{}
 	for name, rec := range r.static {
-		if id := staticCategoryOf(rec); id != "" && inSet[name] != nil {
+		if id := of(rec); id != "" && inSet[name] != nil {
 			n[id]++
 		}
 	}
 	var out []staticCount
-	for _, c := range staticCategories() {
+	for _, c := range groups {
 		if n[c.ID] > 0 {
 			out = append(out, staticCount{c, n[c.ID]})
 		}

@@ -83,7 +83,7 @@ func buildStaticImage(dataDir, version, tag string) error {
 		return fmt.Errorf("image -static: give the gperl version to install (-gperl-version)")
 	}
 	ctx := filepath.Join(dataDir, "static-image-context")
-	if err := writeContext(ctx, "Dockerfile.static", "packages", "mysql.sh", "user.sh", "static.sh", "load.pl"); err != nil {
+	if err := writeContext(ctx, "Dockerfile.static", "packages", "mysql.sh", "user.sh", "static.sh", "load.pl", "watch.sh"); err != nil {
 		return err
 	}
 	arch, err := exec.Command("docker", "version", "--format", "{{.Server.Arch}}").Output()

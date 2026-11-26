@@ -41,7 +41,7 @@ RUN test -n "$GPERL_VERSION" \
 RUN sh /opt/cpancompat/user.sh \
  && mkdir -p /opt/gperl/mod /opt/go-cache /bin-out /app \
  && chown cpan:cpan /opt/gperl/mod /opt/go-cache /bin-out /app
-COPY static.sh load.pl /opt/cpancompat/
+COPY static.sh load.pl watch.sh /opt/cpancompat/
 
 ENV USER=cpan LOGNAME=cpan HOME=/home/cpan SHELL=/bin/bash LANG=C.UTF-8 \
     PATH=/opt/gperl/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \

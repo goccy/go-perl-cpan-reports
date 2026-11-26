@@ -8,7 +8,11 @@
 #                 them: modules (gperl mod download: the snapshot's
 #                 distributions built in the module directory, from the
 #                 archives the run has checked), link (gperl build of
-#                 /app/load.pl into /bin-out/app)
+#                 /app/load.pl into /bin-out/app), and for a target whose
+#                 tests run, test_modules (gperl mod download of the test
+#                 closure's snapshot) and test_link (the test binary's
+#                 project /app/test made, and gperl test -c of it into
+#                 /bin-out/app.test)
 #   <phase>.log   the output of each phase
 #   natives.txt   the Perl packages of the distribution's own native modules
 #                 that have a .pm, which the program loads too: their boot
@@ -30,10 +34,20 @@
 # /app holds the program's directory (cpancompat copies it in): the snapshot,
 # lib/cpancompat-load.txt (the modules load.pl loads, one per line) and the
 # file trees, one "tree<TAB>pathname<TAB>collect" line per distribution of
-# the snapshot, the measured distribution's first.
+# the snapshot, the measured distribution's first. For a target whose tests
+# run it also holds test-cpanfile.snapshot (the snapshot of the test
+# binary's project), test-trees (the trees only the tests need, as in
+# trees) and test-files (the test files to run, one per line); /app/test,
+# the test binary's project, is the distribution's tree as gperl extracted
+# it, with that snapshot.
 #
 # usage: static.sh app|deps|warm <phase limit in seconds> <own tree or ->
 #        static.sh probe|cache
+#        static.sh test-dynamic <own tree>
+#
+# "test-dynamic" makes /app/test and runs the test files on it with gperl
+# test, the dynamic interpreter, as the command of its container (no
+# phases, no records: cpancompat static runs it like a test binary).
 #
 # "app" builds the snapshot and links the program, "deps" only builds the
 # snapshot (a distribution built because others need it), "warm" links a
@@ -52,6 +66,15 @@ mode=$1
 out=/out
 mod=$GPERLMODCACHE
 tools=/opt/cpancompat
+
+# test_project <own tree> makes /app/test, the test binary's project: the
+# own tree as gperl extracted it, without what gperl derived from it, and
+# the snapshot of the test closure.
+test_project() {
+    mkdir /app/test || return 1
+    (cd "$mod/$1" && find . -mindepth 1 -maxdepth 1 ! -name gperl -exec cp -a -t /app/test {} +) || return 1
+    cp /app/test-cpanfile.snapshot /app/test/cpanfile.snapshot
+}
 
 if [ "$mode" = cache ]; then
     set -e
@@ -97,15 +120,29 @@ if [ "$mode" = probe ]; then
 fi
 
 if [ "$mode" = modules-step ]; then
-    # The snapshot's archives go where gperl keeps the archives it
-    # downloaded, so that it downloads none; each appears there complete,
-    # by a rename, as other containers read them.
+    # modules-step <trees file> <project directory>: the archives of the
+    # trees go where gperl keeps the archives it downloaded, so that it
+    # downloads none; each appears there complete, by a rename, as other
+    # containers read them.
     while IFS=$'\t' read -r tree pathname collect; do
         dst=$mod/cache/download/authors/id/$pathname
         [ -f "$dst" ] && continue
         mkdir -p "${dst%/*}" && tmp=$(mktemp "$dst.incoming.XXXXXX") && cp "/archives/$pathname" "$tmp" && mv -f "$tmp" "$dst" || exit 1
-    done < /app/trees
-    cd /app && exec gperl mod download
+    done < "$2"
+    cd "$3" && exec gperl mod download
+fi
+
+if [ "$mode" = test-link-step ]; then
+    # test-link-step <own tree>: the test binary of /app/test.
+    test_project "$2" || exit 1
+    cd /app/test && exec gperl test -c -o /bin-out/app.test
+fi
+
+if [ "$mode" = test-dynamic ]; then
+    # The test files, with the environment cpancompat gives the container.
+    test_project "$2" || exit 1
+    mapfile -t files < /app/test-files || exit 1
+    cd /app/test && exec gperl test -j 1 "${files[@]}"
 fi
 
 limit=$2
@@ -191,7 +228,7 @@ link=false
 case $mode in
     warm) link=true ;;
     app | deps)
-        if phase modules bash "$0" modules-step && [ "$mode" = app ]; then
+        if phase modules bash "$0" modules-step /app/trees /app && [ "$mode" = app ]; then
             link=true
             if [ "$own" != - ]; then
                 natives > $out/natives.txt || exit 1
@@ -203,7 +240,15 @@ esac
 if $link; then
     # The program's directory is the project: gperl build embeds load.pl and
     # lib/, and links what the snapshot names.
-    phase link bash -c 'cd /app && exec gperl build -o /bin-out/app load.pl'
+    # The test binary of a target whose program linked: its tests run only
+    # once that program has run (cpancompat static). What the test closure
+    # needs is built from its snapshot alone; whatever fails on the way is a
+    # phase's failure, which leaves the records of the program as they are.
+    if phase link bash -c 'cd /app && exec gperl build -o /bin-out/app load.pl' && [ -f /app/test-files ]; then
+        phase test_modules bash -c 'mkdir /app/test-modules && cp /app/test-cpanfile.snapshot /app/test-modules/cpanfile.snapshot &&
+            exec bash "$0" modules-step /app/test-trees /app/test-modules' "$0" &&
+            phase test_link bash "$0" test-link-step "$own"
+    fi
 fi
 while IFS=$'\t' read -r tree pathname collect; do
     if [ "$collect" = 1 ] || [ "${before[$tree]}" != built ]; then collect "$tree" || exit 1; fi

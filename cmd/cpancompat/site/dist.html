@@ -113,6 +113,9 @@
   {{- if .Rec.CausedBy}}
   <dt>found in</dt><dd>the native modules of {{range $i, $d := .Rec.CausedBy}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}#static">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}</dd>
   {{- end}}
+  {{- if .Test}}
+  <dt>tests</dt><dd>{{.Test.Title}}{{with .Rec.Test.Files}}; {{num .}} test files{{end}}{{with .Rec.Test.Stuck}}; {{.}} at the limit{{end}}{{with .Rec.Test.BlockedBy}}; not built: {{range $i, $d := .}}{{if $i}}, {{end}}{{with page $d}}<a href="{{.}}#static">{{$d}}</a>{{else}}{{$d}}{{end}}{{end}}{{end}}</dd>
+  {{- end}}
   {{- if .Rec.Loaded}}
   <dt>loads</dt><dd>{{range $i, $m := .Rec.Loaded}}{{if $i}}, {{end}}<code>{{$m}}</code>{{end}}</dd>
   {{- end}}

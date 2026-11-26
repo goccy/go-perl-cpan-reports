@@ -359,7 +359,7 @@ func failureRecord(dir string, res *result, d *dist) failure {
 	rec.Cause = causeOf(lines, res.Outcome)
 	ev = withLine(ev, causeLine(lines, rec.Cause))
 	if rec.TimedOut {
-		s := stuckOf(filepath.Join(dir, rec.Phase+".stuck.jsonl"))
+		s := stuckOf(filepath.Join(dir, rec.Phase+".stuck.jsonl"), "/usr/bin/timeout")
 		rec.Stuck = s
 		// A forked child that died of the limitation leaves its parent
 		// waiting for it: the test file running at the limit printed
@@ -670,16 +670,18 @@ func symbolsOf(text string) []string {
 
 // stuckOf reads a phase's stuck.jsonl and tells what its processes were
 // doing: the busiest process when one used the CPU, otherwise the
-// processes at the bottom of the phase's process tree. It returns nil when
-// the file is missing or unreadable, or names no phase process.
-func stuckOf(name string) *stuck {
+// processes at the bottom of the phase's process tree: the processes below
+// the one that runs program (dist.sh's /usr/bin/timeout, a static test
+// binary). It returns nil when the file is missing or unreadable, or names
+// no such process.
+func stuckOf(name, program string) *stuck {
 	procs, err := readJSONLines[stuckProcess](name)
 	if err != nil || len(procs) == 0 {
 		return nil
 	}
 	var root *stuckProcess
 	for i := range procs {
-		if len(procs[i].Args) > 0 && procs[i].Args[0] == "/usr/bin/timeout" {
+		if len(procs[i].Args) > 0 && procs[i].Args[0] == program {
 			root = &procs[i]
 			break
 		}

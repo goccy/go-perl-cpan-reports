@@ -26,6 +26,12 @@ package main
 //
 // Distributions a target needs that did not pass themselves are built as
 // dependencies only (state "dependency"), and are not measured.
+//
+// A static target's own tests then run with its test binary (gperl test
+// -c of its tree, with a snapshot that adds what its tests need, which it
+// waits for too): the test files the run's harness reported on, in the
+// empty container, and when they fail there, in the build image and with
+// gperl test, which tells why (staticTest).
 
 import (
 	"archive/tar"
@@ -48,6 +54,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -115,6 +122,49 @@ const (
 	reasonLoadTimeout = "load_timeout"
 )
 
+// The states of a static target's own tests (staticTest), run by its test
+// binary (gperl test -c) once its program is static.
+const (
+	// testPass: the test files passed in the empty container.
+	testPass = "pass"
+	// testNeedsEnvironment: they failed there and passed with the same
+	// binary in the build environment.
+	testNeedsEnvironment = "needs_environment"
+	// testStaticFailed: they failed with the binary in both, and passed
+	// on the same project with gperl test.
+	testStaticFailed = "static_failed"
+	// testDiffersFromMakeTest: they failed with gperl test too; they
+	// passed under make test in the run.
+	testDiffersFromMakeTest = "differs_from_make_test"
+	// testTimeout: the binary ran out of time in the empty container
+	// (Stuck says whether it was blocked, spinning or slow).
+	testTimeout = "timeout"
+	// testDepsFailed: a distribution only the tests need was not built.
+	testDepsFailed = "deps_failed"
+	// testLinkFailed: gperl test -c did not build the test binary.
+	testLinkFailed = "link_failed"
+	// testNoRecord: the run recorded no test files of the distribution
+	// (its test files are what the run's harness reported on).
+	testNoRecord = "no_test_record"
+)
+
+// testEnvironment is the environment make test gives test files
+// (ExtUtils::MakeMaker's test_via_harness, Test::Harness's runtests) and
+// the run's dist.sh exports, which every test run (the test binary's,
+// gperl test's) gets. dist.sh names itself, the test files' ancestor, as
+// the CPAN client that runs ($$); in a test container that ancestor is its
+// init, process 1.
+var testEnvironment = []string{"PERL_DL_NONLAZY=1", "PERL_USE_UNSAFE_INC=1", "PERL_MM_USE_DEFAULT=1", "NONINTERACTIVE_TESTING=1",
+	"PERL5_CPAN_IS_RUNNING=1", "PERL5_CPANPLUS_IS_RUNNING=1"}
+
+// testBinaryPath is where a build container's test binary is, in its binary
+// volume as the containers that run it mount that.
+const testBinaryPath = "/app/app.test"
+
+// testPids is the process limit of a test run: the run's test containers'
+// (run.go's dist.sh container).
+const testPids = "2048"
+
 // The conditions of the empty container a binary is run in.
 const (
 	// emptyImage is the image without a single file (cpancompat image
@@ -124,8 +174,9 @@ const (
 	loadLimit = 120 * time.Second
 	// loadMemory is the memory of that container, the survey's.
 	loadMemory = "1500m"
-	// loadTmpfs is the writable /tmp it gets.
-	loadTmpfs = "/tmp:rw,size=1g,mode=1777"
+	// loadTmpfs is the writable /tmp it gets, where programs may run as
+	// they may in a /tmp on disk (a docker tmpfs is noexec unless told).
+	loadTmpfs = "/tmp:rw,exec,size=1g,mode=1777"
 	// loadUser is the user the binary runs as there.
 	loadUser = "65534:65534"
 )
@@ -194,6 +245,24 @@ type staticRecord struct {
 	Attempts   int           `json:"attempts"`
 	Seconds    int           `json:"seconds"`
 	Finished   string        `json:"finished"`
+	// Test is how the target's own tests went with its test binary; nil
+	// when they did not run (the program is not static, or the record is
+	// not a target's).
+	Test *staticTest `json:"test,omitempty"`
+}
+
+// staticTest is how a static target's own test files went with its test
+// binary. Their phases are in the record's Phases.
+type staticTest struct {
+	State string `json:"state"`
+	// Files counts the test files the binary was given.
+	Files int `json:"files,omitempty"`
+	// Stuck is what the processes of a binary that ran out of time were
+	// doing: blocked, spinning or slow (see stuckOf).
+	Stuck string `json:"stuck,omitempty"`
+	// BlockedBy names the distributions only the tests need that were not
+	// built (deps_failed).
+	BlockedBy []string `json:"blocked_by,omitempty"`
 }
 
 // moduleBuildFailed reports whether the record says the distribution was
@@ -328,6 +397,16 @@ type staticRunner struct {
 	// verified are the distributions whose archives are in the data
 	// directory, checked.
 	verified map[string]bool
+	// testRequirements caches what each target needs for its tests too
+	// (requirementsOf with testPhases).
+	testRequirements map[string]*distRequirements
+	// testFiles are, by distribution, the test files the run's harness
+	// reported on: the ones its test binary runs.
+	testFiles map[string][]string
+	// testLimit and testMemory are what the run gave a distribution's
+	// test phase: how long it may run, and the memory of its container.
+	testLimit  time.Duration
+	testMemory string
 }
 
 // staticAttempted is what a worker hands back: the record, and the
@@ -349,6 +428,7 @@ func runStatic(opts staticOptions) (err error) {
 		cacheImage:   "cpancompat-static-cache:" + opts.run,
 		label:        "cpancompat-static=" + opts.run,
 		requirements: map[string]*distRequirements{}, verified: map[string]bool{},
+		testRequirements: map[string]*distRequirements{}, testFiles: map[string][]string{},
 	}
 	s.staticDir = filepath.Join(s.runDir, "static")
 	s.treesDir = filepath.Join(s.staticDir, "trees")
@@ -389,6 +469,9 @@ func runStatic(opts staticOptions) (err error) {
 		if res.Outcome != outcomePass {
 			continue
 		}
+		for _, f := range res.Tests {
+			s.testFiles[res.Dist] = append(s.testFiles[res.Dist], f.File)
+		}
 		d := s.dists[res.Dist]
 		if d == nil {
 			return fmt.Errorf("static: run %s recorded %s, which %s does not have", opts.run, res.Dist, distsFile)
@@ -397,6 +480,9 @@ func runStatic(opts staticOptions) (err error) {
 	}
 	targets, err := staticTargets(passed, opts.only, opts.top)
 	if err != nil {
+		return err
+	}
+	if s.testLimit, s.testMemory, err = runTestSettings(filepath.Join(s.runDir, "invocations.jsonl")); err != nil {
 		return err
 	}
 	for _, name := range targets {
@@ -480,6 +566,25 @@ func staticTargets(passed []*dist, only []string, top int) ([]string, error) {
 		names[i] = d.Dist
 	}
 	return names, nil
+}
+
+// runTestSettings returns the test phase's time limit and the containers'
+// memory of the run's latest invocation (invocations.jsonl) that recorded
+// a limit: what a test binary runs with.
+func runTestSettings(name string) (time.Duration, string, error) {
+	invs, err := readJSONLines[invocation](name)
+	if err != nil {
+		return 0, "", err
+	}
+	for i := len(invs) - 1; i >= 0; i-- {
+		if invs[i].TestSeconds > 0 {
+			if invs[i].Memory == "" {
+				return 0, "", fmt.Errorf("static: %s: the invocation that records the test limit records no memory", name)
+			}
+			return time.Duration(invs[i].TestSeconds) * time.Second, invs[i].Memory, nil
+		}
+	}
+	return 0, "", fmt.Errorf("static: %s records no test limit", name)
 }
 
 // recordStaticInvocation appends what this invocation runs with to the run's
@@ -569,7 +674,7 @@ func (s *staticRunner) buildArgs(binVolume string, offlineGo bool) []string {
 		"-v", s.archives + ":/archives:ro",
 		"--tmpfs", "/opt/gperl/mod/cache/sdk:rw,mode=1777",
 		"--tmpfs", "/opt/gperl/mod/cache/linkset:rw,mode=1777",
-		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,mode=1777",
+		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,exec,mode=1777",
 	}
 	if offlineGo {
 		// The Go modules every program needs are in the cache image's
@@ -747,7 +852,7 @@ func (s *staticRunner) warm() error {
 		return err
 	}
 	name := "cpancompat-" + s.opts.run + "-static-warm"
-	input, err := appArchive(nil, nil, nil)
+	input, err := appArchive(nil, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -834,14 +939,20 @@ func (s *staticRunner) schedule(attempt func(*staticJob) (*staticRecord, []strin
 	for {
 		for active < s.opts.jobs && s.ready.Len() > 0 {
 			n := heap.Pop(&s.ready).(*staticNode)
-			closure, err := s.closure(n)
+			closure, tests, err := s.closures(n)
 			if err != nil {
 				if err := s.recordUnreadable(n, err); err != nil {
 					return err
 				}
 				continue
 			}
-			if s.waitFor(n, closure) {
+			// A target waits for what its tests need too: no container but
+			// that distribution's own builds it.
+			wait := closure
+			if tests != nil {
+				wait = tests
+			}
+			if s.waitFor(n, wait) {
 				continue
 			}
 			if rec := s.unbuildable(n, closure); rec != nil {
@@ -855,7 +966,7 @@ func (s *staticRunner) schedule(attempt func(*staticJob) (*staticRecord, []strin
 				n.started = time.Now()
 			}
 			n.attempts++
-			job, err := s.prepare(n, closure, seq)
+			job, err := s.prepare(n, closure, tests, seq)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "cpancompat: %s: %v\n", n.d.Dist, err)
 				rec := s.newRecord(n)
@@ -990,17 +1101,20 @@ func (s *staticRunner) settle(a staticAttempted) error {
 	n.forced = false
 	for _, name := range a.collected {
 		delete(s.requirements, name)
+		delete(s.testRequirements, name)
 	}
 	if n.target && (a.rec.State == staticStatic || a.rec.State == staticNotStatic && !a.rec.moduleBuildFailed()) {
-		closure, err := s.closure(n)
+		closure, tests, err := s.closures(n)
 		if err != nil {
 			return s.recordUnreadable(n, err)
 		}
-		for _, name := range closure {
-			if !slices.Contains(a.job.closure, name) {
-				fmt.Fprintf(os.Stderr, "cpancompat: %s needs %s, which a configure step asked for: linking it again\n", n.d.Dist, name)
-				heap.Push(&s.ready, n)
-				return nil
+		for _, c := range [][2][]string{{closure, a.job.closure}, {tests, a.job.testClosure}} {
+			for _, name := range c[0] {
+				if !slices.Contains(c[1], name) {
+					fmt.Fprintf(os.Stderr, "cpancompat: %s needs %s, which a configure step asked for: linking it again\n", n.d.Dist, name)
+					heap.Push(&s.ready, n)
+					return nil
+				}
 			}
 		}
 	}
@@ -1059,12 +1173,39 @@ func (s *staticRunner) record(n *staticNode, rec *staticRecord) error {
 // indirectly. (A distribution the interpreter ships is in its own closure
 // too: the snapshot pins its release, which the program then loads.)
 func (s *staticRunner) closure(n *staticNode) ([]string, error) {
+	return s.closureWith(n, s.requirementsOf)
+}
+
+// closures returns n's closure and, for a target, its test closure (nil for
+// a dependency).
+func (s *staticRunner) closures(n *staticNode) (closure, tests []string, err error) {
+	if closure, err = s.closure(n); err != nil || !n.target {
+		return closure, nil, err
+	}
+	tests, err = s.testClosure(n)
+	return closure, tests, err
+}
+
+// testClosure returns, sorted, the distributions a target's test binary
+// carries: its closure and what its own tests need besides, with what
+// those need to be configured, built and run. A dependency's tests are
+// never run (gperl's mod tidy, cpanm).
+func (s *staticRunner) testClosure(n *staticNode) ([]string, error) {
+	return s.closureWith(n, s.testRequirementsOf)
+}
+
+// closureWith is closure, with n's own requirements read by own.
+func (s *staticRunner) closureWith(n *staticNode, own func(string) (*distRequirements, error)) ([]string, error) {
 	seen := map[string]bool{n.d.Dist: true}
 	stack := []string{n.d.Dist}
 	for len(stack) > 0 {
 		cur := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		reqs, err := s.requirementsOf(cur)
+		of := s.requirementsOf
+		if cur == n.d.Dist {
+			of = own
+		}
+		reqs, err := of(cur)
 		if err != nil {
 			return nil, err
 		}
@@ -1093,7 +1234,19 @@ func (s *staticRunner) closure(n *staticNode) ([]string, error) {
 // library meets, perl itself and a module the index does not know need no
 // distribution.
 func (s *staticRunner) requirementsOf(name string) (*distRequirements, error) {
-	if r := s.requirements[name]; r != nil {
+	return s.requirementsIn(name, staticPhases, s.requirements)
+}
+
+// testRequirementsOf is requirementsOf with the requirements of the test
+// phase too: what a target's own tests need.
+func (s *staticRunner) testRequirementsOf(name string) (*distRequirements, error) {
+	return s.requirementsIn(name, testPhases, s.testRequirements)
+}
+
+// requirementsIn returns the requirements of the phases of the distribution,
+// as requirementsOf tells them, kept in cache.
+func (s *staticRunner) requirementsIn(name string, phases map[string]bool, cache map[string]*distRequirements) (*distRequirements, error) {
+	if r := cache[name]; r != nil {
 		return r, nil
 	}
 	d := s.dists[name]
@@ -1107,12 +1260,12 @@ func (s *staticRunner) requirementsOf(name string) (*distRequirements, error) {
 	raw, err := os.ReadFile(mymeta)
 	switch {
 	case mymeta != "" && err == nil:
-		if lines, configures, err = mymetaRequirements(raw); err != nil {
+		if lines, configures, err = mymetaRequirements(raw, phases); err != nil {
 			return nil, fmt.Errorf("%s: %w", mymeta, err)
 		}
 	case mymeta == "" || errors.Is(err, os.ErrNotExist):
 		for _, req := range d.Requires {
-			if req.Relationship == "requires" && staticPhases[req.Phase] {
+			if req.Relationship == "requires" && phases[req.Phase] {
 				lines = append(lines, snapshotPackage{req.Module, cmp.Or(req.Version, "0")})
 				configures = configures || req.Phase == "configure"
 			}
@@ -1149,13 +1302,16 @@ func (s *staticRunner) requirementsOf(name string) (*distRequirements, error) {
 		}
 	}
 	sort.Strings(r.needs)
-	s.requirements[name] = r
+	cache[name] = r
 	return r, nil
 }
 
 // staticPhases are the phases whose requirements a program's dependencies
 // need: gperl runs neither their tests nor anyone's development tools.
 var staticPhases = map[string]bool{"configure": true, "build": true, "runtime": true}
+
+// testPhases are the phases whose requirements a target's tests need.
+var testPhases = map[string]bool{"configure": true, "build": true, "runtime": true, "test": true}
 
 // mergeRequirements gives each module one line, its ranges joined as gperl
 // joins them (internal/mod/tidy.go), sorted by module.
@@ -1178,11 +1334,11 @@ func mergeRequirements(lines []snapshotPackage) []snapshotPackage {
 	return out
 }
 
-// mymetaRequirements reads the configure, build and runtime "requires" of a
-// MYMETA.json: CPAN::Meta::Spec version 2 (prereqs/<phase>/requires), or
-// the version 1 keys (configure_requires, build_requires, requires), and
-// whether it requires anything to configure.
-func mymetaRequirements(raw []byte) ([]snapshotPackage, bool, error) {
+// mymetaRequirements reads the "requires" of phases of a MYMETA.json:
+// CPAN::Meta::Spec version 2 (prereqs/<phase>/requires), or the version 1
+// keys (configure_requires, build_requires, requires; version 1 has no
+// test phase), and whether it requires anything to configure.
+func mymetaRequirements(raw []byte, phases map[string]bool) ([]snapshotPackage, bool, error) {
 	var meta struct {
 		Spec struct {
 			Version versionText `json:"version"`
@@ -1197,7 +1353,7 @@ func mymetaRequirements(raw []byte) ([]snapshotPackage, bool, error) {
 	}
 	var sets []map[string]versionText
 	if v, ok := parsePerlVersion(string(meta.Spec.Version)); ok && v.compare(perlVersion{2}) >= 0 {
-		for phase := range staticPhases {
+		for phase := range phases {
 			sets = append(sets, meta.Prereqs[phase]["requires"])
 		}
 		meta.ConfigureRequires = meta.Prereqs["configure"]["requires"]
@@ -1297,8 +1453,9 @@ func (s *staticRunner) snapshotOf(closure []string) ([]byte, error) {
 
 // appArchive is the tar stream copied into a build container's root: the
 // program's directory /app, owned by the image's user, with the snapshot,
-// the modules to load and the trees file.
-func appArchive(snapshot []byte, load []string, trees []string) ([]byte, error) {
+// the modules to load and the trees file, and, with test, the test
+// binary's snapshot, trees file and test files (static.sh).
+func appArchive(snapshot []byte, load []string, trees []string, test *testInput) ([]byte, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	now := time.Now()
@@ -1319,6 +1476,16 @@ func appArchive(snapshot []byte, load []string, trees []string) ([]byte, error) 
 			name string
 			data []byte
 		}{"app/cpanfile.snapshot", snapshot})
+	}
+	if test != nil {
+		files = append(files, []struct {
+			name string
+			data []byte
+		}{
+			{"app/test-cpanfile.snapshot", test.snapshot},
+			{"app/test-trees", []byte(joinLines(test.trees))},
+			{"app/test-files", []byte(joinLines(test.files))},
+		}...)
 	}
 	for _, f := range files {
 		if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: f.name, Mode: 0o644, Size: int64(len(f.data)), Uid: imageUID, Gid: imageUID, ModTime: now}); err != nil {
@@ -1358,6 +1525,22 @@ type staticJob struct {
 	// load are the modules the program loads (none for a dependency).
 	load  []string
 	input []byte
+	// testClosure is a target's test closure (nil for a dependency), and
+	// testFiles the test files its test binary runs. test is how its tests
+	// went when that is known before its container runs: the run recorded
+	// no test files, or a distribution only they need was not built.
+	testClosure []string
+	testFiles   []string
+	test        *staticTest
+}
+
+// testInput is what a build container gets for a target's test binary: the
+// snapshot of its test closure, the trees file of the distributions only
+// its tests need, and the test files to run.
+type testInput struct {
+	snapshot []byte
+	trees    []string
+	files    []string
 }
 
 // prepare makes the job of n's next container: the archives of the closure
@@ -1365,9 +1548,12 @@ type staticJob struct {
 // the closure and the trees file. The trees file lists the trees of the
 // closure, the distribution's own first, with whether to collect what gperl
 // derives from each: the ones the run has not collected yet, which only
-// this container can build (every other is settled, see waitFor).
-func (s *staticRunner) prepare(n *staticNode, closure []string, seq int) (*staticJob, error) {
-	job := &staticJob{n: n, closure: closure, attempts: n.attempts, seq: seq, own: "-", treeDist: map[string]string{}}
+// this container can build (every other is settled, see waitFor). A
+// target's container also gets what its test binary is made from
+// (testInput), unless its test state is known already.
+func (s *staticRunner) prepare(n *staticNode, closure, tests []string, seq int) (*staticJob, error) {
+	job := &staticJob{n: n, closure: closure, attempts: n.attempts, seq: seq, own: "-", treeDist: map[string]string{},
+		testClosure: tests, testFiles: s.testFiles[n.d.Dist]}
 	var trees []string
 	for _, name := range closure {
 		d := s.dists[name]
@@ -1397,13 +1583,59 @@ func (s *staticRunner) prepare(n *staticNode, closure []string, seq int) (*stati
 	if err != nil {
 		return nil, err
 	}
+	var test *testInput
 	if n.target {
 		job.load = mainModules(n.d)
+		if test, err = s.testInputOf(job); err != nil {
+			return nil, err
+		}
 	}
-	if job.input, err = appArchive(snapshot, job.load, trees); err != nil {
+	if job.input, err = appArchive(snapshot, job.load, trees, test); err != nil {
 		return nil, err
 	}
 	return job, nil
+}
+
+// testInputOf returns what a target's container makes its test binary from;
+// nil, with job.test set, when its tests cannot run: the run recorded no
+// test files of it, or a distribution only its tests need is not built.
+// That is one whose build failed, or one not settled yet: a target forced
+// to start (see force) waits for none, and its container must not build a
+// distribution whose record is another's; such a target's tests are not
+// run, and name the distributions that were not built when it started.
+func (s *staticRunner) testInputOf(job *staticJob) (*testInput, error) {
+	if len(job.testFiles) == 0 {
+		job.test = &staticTest{State: testNoRecord}
+		return nil, nil
+	}
+	in := &testInput{files: job.testFiles}
+	var blocked []string
+	for _, name := range job.testClosure {
+		if slices.Contains(job.closure, name) {
+			continue
+		}
+		if m := s.nodes[name]; m == nil || m.rec == nil || m.rec.moduleBuildFailed() {
+			blocked = append(blocked, name)
+			continue
+		}
+		d := s.dists[name]
+		if err := s.verifyArchive(d); err != nil {
+			return nil, err
+		}
+		tree, err := gperlTreeName(d.Path)
+		if err != nil {
+			return nil, err
+		}
+		// Its own container collected it.
+		in.trees = append(in.trees, tree+"\t"+d.Path+"\t0")
+	}
+	if len(blocked) > 0 {
+		job.test = &staticTest{State: testDepsFailed, Files: len(job.testFiles), BlockedBy: blocked}
+		return nil, nil
+	}
+	var err error
+	in.snapshot, err = s.snapshotOf(job.testClosure)
+	return in, err
 }
 
 // attempt measures one distribution once: it builds the closure in the
@@ -1522,6 +1754,7 @@ func (s *staticRunner) attempt(job *staticJob) (*staticRecord, []string) {
 		if len(rec.ExternalLibs) > 0 {
 			rec.Reason = reasonBundlesSystemLibraries
 		}
+		s.runTests(job, name, b.volume, dir, rec, s.runIn)
 		return rec, collected
 	case empty.TimedOut:
 		rec.Reason = reasonLoadTimeout
@@ -1695,7 +1928,7 @@ type builtContainer struct {
 // remove removes the container and the volume, reporting a failure: what
 // it leaves, the next invocation removes (prepareDocker).
 func (b builtContainer) remove() {
-	if err := removeContainers(b.name, b.name+"-run", b.name+"-control"); err != nil {
+	if err := removeContainers(b.name, b.name+"-run", b.name+"-control", b.name+"-test", b.name+"-test-control", b.name+"-test-dynamic"); err != nil {
 		fmt.Fprintf(os.Stderr, "cpancompat: %v\n", err)
 	}
 	if out, err := exec.Command("docker", "volume", "rm", b.volume).CombinedOutput(); err != nil {
@@ -1756,23 +1989,78 @@ func (s *staticRunner) build(name, dir, mode, own string, input []byte, offlineG
 // container, or (empty false) in the build image, as the image's user, with
 // everything the build had but the network. Its output goes to logName.
 func (s *staticRunner) runBinary(name, volume, logName string, empty bool) (phaseRecord, error) {
-	p := phaseRecord{Phase: "run_control"}
-	args := []string{"--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-		"--ulimit", "core=0", "--memory", loadMemory, "--pids-limit", "512", "--tmpfs", loadTmpfs,
-		"-v", volume + ":/app:ro"}
+	r := binaryRun{phase: "run_control", empty: empty, argv: []string{"/app/app"}, limit: loadLimit, memory: loadMemory,
+		pids: "512", mounts: []string{"-v", volume + ":/app:ro"}}
 	if empty {
-		p.Phase = "run_empty"
-		args = append(args, "--user", loadUser, "--read-only", emptyImage, "/app/app")
-	} else {
-		args = append(args, s.cacheImage, "/app/app")
+		r.phase = "run_empty"
 	}
+	return s.runIn(name, logName, r)
+}
+
+// binaryRun is one run of a program in a container without the network.
+type binaryRun struct {
+	phase string
+	// empty: in the empty container, as loadUser; otherwise in the build
+	// image, as its user.
+	empty bool
+	// mounts are the container's volumes (docker create arguments), input
+	// a tar stream copied into its root.
+	mounts []string
+	input  []byte
+	// argv is its command line, env what it adds to the environment.
+	argv []string
+	env  []string
+	// limit is how long it may run; memory and pids are the limits of its
+	// container.
+	limit        time.Duration
+	memory, pids string
+	// init runs it below an init process, which reaps the processes the
+	// program's children leave.
+	init bool
+	// stuck, when not "", is the file a record of the container's
+	// processes goes to (watch.sh snapshot) when it still runs 15 seconds
+	// before its limit: what tells why a program ran out of time.
+	stuck string
+}
+
+// runIn runs a container as r says, with its output in logName.
+func (s *staticRunner) runIn(name, logName string, r binaryRun) (phaseRecord, error) {
+	p := phaseRecord{Phase: r.phase}
+	args := append([]string{"--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+		"--ulimit", "core=0", "--memory", r.memory, "--pids-limit", r.pids, "--tmpfs", loadTmpfs}, r.mounts...)
+	if r.init {
+		args = append(args, "--init")
+	}
+	for _, kv := range r.env {
+		args = append(args, "-e", kv)
+	}
+	if r.empty {
+		args = append(args, "--user", loadUser, "--read-only", emptyImage)
+	} else {
+		args = append(args, s.cacheImage)
+	}
+	args = append(args, r.argv...)
 	log, err := os.Create(logName)
 	if err != nil {
 		return p, err
 	}
+	var snapshot func() error
+	if r.stuck != "" && r.limit > 30*time.Second {
+		snapshot = func() error { return s.snapshotProcesses(name, r.stuck) }
+	}
 	start := time.Now()
-	end, timedOut, err := runContainer(name, s.label, args, nil, log, loadLimit)
+	end, timedOut, snapshotErr, err := superviseRun(r.limit, r.limit-15*time.Second, snapshot,
+		func() error { return exec.Command("docker", "kill", name).Run() },
+		func() (containerEnd, error) {
+			end, _, err := runContainer(name, s.label, args, r.input, log, 0)
+			return end, err
+		})
 	p.Seconds = int(time.Since(start).Seconds())
+	if snapshotErr != nil {
+		// Without the record, a program that ran out of time is not told
+		// blocked, spinning or slow; that is all it changes.
+		fmt.Fprintf(os.Stderr, "cpancompat: the record of the processes of %s: %v\n", name, snapshotErr)
+	}
 	if err = errors.Join(err, log.Close()); err != nil {
 		return p, err
 	}
@@ -1782,6 +2070,161 @@ func (s *staticRunner) runBinary(name, volume, logName string, empty bool) (phas
 		p.Status = -1
 	}
 	return p, nil
+}
+
+// superviseRun runs a container by run, which returns when the container
+// has ended, and ends it by kill once it has run for limit (timedOut). With
+// snapshot, a record of its processes is taken at snapshotAt while it runs,
+// and the kill at the limit waits for that record to be whole: the record
+// is of a program that ran out of time, taken before it was ended.
+func superviseRun(limit, snapshotAt time.Duration, snapshot, kill func() error, run func() (containerEnd, error)) (end containerEnd, timedOut bool, snapshotErr, err error) {
+	start := time.Now()
+	done := make(chan struct{})
+	var killErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// wait waits until d after the start, and reports whether the
+		// container still runs then.
+		wait := func(d time.Duration) bool {
+			t := time.NewTimer(d - time.Since(start))
+			defer t.Stop()
+			select {
+			case <-done:
+				return false
+			case <-t.C:
+				return true
+			}
+		}
+		if snapshot != nil {
+			if !wait(snapshotAt) {
+				return
+			}
+			snapshotErr = snapshot()
+		}
+		if !wait(limit) {
+			return
+		}
+		timedOut = true
+		killErr = kill()
+	}()
+	end, err = run()
+	close(done)
+	wg.Wait()
+	if killErr != nil {
+		// The container has ended (run returned): a kill that failed found
+		// it ended already, or it ended otherwise.
+		fmt.Fprintf(os.Stderr, "cpancompat: ending a container at its limit: %v\n", killErr)
+	}
+	return end, timedOut, snapshotErr, err
+}
+
+// snapshotProcesses writes to out what the processes of the running
+// container name are doing (watch.sh snapshot), from a container of the
+// build image that shares its processes: the container itself may hold
+// nothing but a binary. It is the container's user, which may read what its
+// processes have open.
+func (s *staticRunner) snapshotProcesses(name, out string) error {
+	partial := out + ".partial"
+	f, err := os.Create(partial)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("docker", "run", "--rm", "--name", name+"-watch", "--label", s.label, "--pid", "container:"+name,
+		"--init", "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--ulimit", "core=0",
+		"--user", loadUser, s.cacheImage, "bash", "/opt/cpancompat/watch.sh", "snapshot")
+	var stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = f, &stderr
+	err = cmd.Run()
+	if err = errors.Join(err, f.Close()); err != nil {
+		return errors.Join(fmt.Errorf("docker run: %v: %s", err, stderr.String()), os.Remove(partial))
+	}
+	return os.Rename(partial, out)
+}
+
+// runTests runs a static target's own test files with its test binary (the
+// build container's test_link) and records how they went in rec.Test: in
+// the empty container; when they fail there, with the same binary in the
+// build image, which has what the run's tests had but the network; and when
+// they fail there too, on the same project with gperl test, in the same
+// conditions. Each container runs by run (runIn). Nothing here changes the
+// record of the program: a test run that cannot be carried out (the
+// harness or docker failing) leaves rec.Test nil and says why on standard
+// error.
+func (s *staticRunner) runTests(job *staticJob, name, volume, dir string, rec *staticRecord, run func(name, logName string, r binaryRun) (phaseRecord, error)) {
+	if job.test != nil {
+		rec.Test = job.test
+		return
+	}
+	t, err := s.testOutcome(job, name, volume, dir, rec, run)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cpancompat: %s: its tests could not be run: %v\n", rec.Dist, err)
+		return
+	}
+	rec.Test = t
+}
+
+// testOutcome is how a static target's tests went (runTests).
+func (s *staticRunner) testOutcome(job *staticJob, name, volume, dir string, rec *staticRecord, run func(name, logName string, r binaryRun) (phaseRecord, error)) (*staticTest, error) {
+	t := &staticTest{Files: len(job.testFiles)}
+	for _, step := range []struct{ phase, state string }{{"test_modules", testDepsFailed}, {"test_link", testLinkFailed}} {
+		p := phaseNamed(rec.Phases, step.phase)
+		if p == nil {
+			return nil, fmt.Errorf("the build container recorded no %s phase (%s)", step.phase, filepath.Join(dir, "container.log"))
+		}
+		if p.Status != 0 || p.TimedOut {
+			t.State = step.state
+			return t, nil
+		}
+	}
+	argv := append([]string{testBinaryPath, "-j", "1"}, job.testFiles...)
+	binary := []string{"-v", volume + ":/app:ro"}
+	r := binaryRun{phase: "test_empty", empty: true, mounts: binary, argv: argv, env: testEnvironment, limit: s.testLimit,
+		memory: s.testMemory, pids: testPids, init: true, stuck: filepath.Join(dir, "test_empty.stuck.jsonl")}
+	empty, err := run(name+"-test", filepath.Join(dir, "test_empty.log"), r)
+	if err != nil {
+		return nil, err
+	}
+	rec.Phases = append(rec.Phases, empty)
+	switch {
+	case empty.Status == 0:
+		t.State = testPass
+		return t, nil
+	case empty.TimedOut:
+		t.State = testTimeout
+		if st := stuckOf(r.stuck, testBinaryPath); st != nil {
+			t.Stuck = st.Kind
+		}
+		return t, nil
+	}
+	// The run's tests had a display (dist.sh); gperl test runs on the
+	// module directory, and builds nothing (the test binary was built).
+	control := binaryRun{phase: "test_control", mounts: binary, argv: append([]string{"xvfb-run", "-a"}, argv...),
+		env: testEnvironment, limit: s.testLimit, memory: s.testMemory, pids: testPids, init: true}
+	dynamic := control
+	dynamic.phase, dynamic.input = "test_dynamic", job.input
+	dynamic.mounts = []string{"-v", s.modVolume + ":/opt/gperl/mod",
+		"--tmpfs", "/opt/gperl/mod/cache/sdk:rw,mode=1777", "--tmpfs", "/opt/gperl/mod/cache/linkset:rw,mode=1777",
+		"--tmpfs", "/opt/gperl/mod/cache/lib:rw,exec,mode=1777"}
+	dynamic.argv = []string{"xvfb-run", "-a", "bash", "/opt/cpancompat/static.sh", "test-dynamic", job.own}
+	for _, c := range []struct {
+		r     binaryRun
+		name  string
+		state string
+	}{{control, name + "-test-control", testNeedsEnvironment}, {dynamic, name + "-test-dynamic", testStaticFailed}} {
+		p, err := run(c.name, filepath.Join(dir, c.r.phase+".log"), c.r)
+		if err != nil {
+			return nil, err
+		}
+		rec.Phases = append(rec.Phases, p)
+		if p.Status == 0 && !p.TimedOut {
+			t.State = c.state
+			return t, nil
+		}
+	}
+	t.State = testDiffersFromMakeTest
+	return t, nil
 }
 
 // containerEnd is how a container ended (docker inspect's State).
