@@ -27,7 +27,7 @@ different release on each, and its page names the release each run measured.
 | `go-perl` | gperl, go-perl v0.3.0 | 13,486 (93.4%) |
 | `perl` | perl 5.44.0 | 13,978 (96.8%) |
 
-go-perl passes 96.3% of what perl passes. Both runs: 16 distributions at a time, each
+Of the 13,978 distributions perl passes, 13,458 (96.3%) pass on go-perl too. Both runs: 16 distributions at a time, each
 container with one CPU and 1500 MiB of memory, the test phase of a distribution limited
 to five minutes, on linux/arm64.
 
