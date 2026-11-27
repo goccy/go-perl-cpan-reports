@@ -9,7 +9,7 @@
   "perl": "5.44.0",
   "packages_sha256": "cf7f76275d6e5ad3336ee35d0578723c2a9951b3073a66be6a190cad74fbb58c",
   "provisional": true,
-  "note": "One full survey of the released go-perl v0.3.0 on the CPAN snapshot of 2026-11-20, and the static builds of what passed with gperl v0.3.1. The results of perl itself are from the snapshot of 2026-11-10, joined with these by distribution name.",
+  "note": "One full survey of the released go-perl v0.3.0 on the CPAN snapshot of 2026-11-20, and the static builds of what passed, made and tested with the released gperl v0.3.4. The results of perl itself are from the snapshot of 2026-11-10, joined with these by distribution name.",
   "compared_with": "perl",
   "first_result": "2026-11-24T04:21:46Z",
   "last_result": "2026-11-24T07:15:25Z",
@@ -14358,8 +14358,8 @@
       "Path": "github.com/goccy/go-perl/cmd/gperl",
       "Main": {
         "Path": "github.com/goccy/go-perl",
-        "Version": "v0.3.1",
-        "Sum": "h1:WcivLcryqF65wd/6/km5Q5EGCSxs9yzd1ZV4lIbvl8A="
+        "Version": "v0.3.4",
+        "Sum": "h1:cTlCifkDHek5Z/T/EcauwqQ0MnrWq52CUTmWwGsoY4E="
       },
       "GoVersion": "go1.26.4"
     },
@@ -14382,31 +14382,16 @@
       "stdc++",
       "util"
     ],
-    "first_result": "2026-11-24T07:16:53Z",
-    "last_result": "2026-11-24T11:54:52Z",
-    "recorded": 14109,
+    "first_result": "2026-11-26T06:32:41Z",
+    "last_result": "2026-11-26T14:35:59Z",
+    "recorded": 14141,
     "invocations": [
       {
-        "started": "2026-11-24T07:16:50Z",
-        "image": "cpancompat-static:gperl-v0.3.1",
+        "started": "2026-11-26T06:32:36Z",
+        "image": "cpancompat-static:gperl-v0.3.4",
         "platform": "linux/arm64",
         "harness": {
-          "module": "github.com/goccy/go-perl-cpan-testers",
-          "revision": "2f4e150881d3713eb54986d11cd023cc904525a3",
-          "modified": true
-        },
-        "jobs": 4,
-        "cpus": "2",
-        "memory": "4g",
-        "wall_seconds": 3600,
-        "top": 300
-      },
-      {
-        "started": "2026-11-24T07:24:14Z",
-        "image": "cpancompat-static:gperl-v0.3.1",
-        "platform": "linux/arm64",
-        "harness": {
-          "module": "github.com/goccy/go-perl-cpan-testers",
+          "module": "github.com/goccy/go-perl-cpan-reports",
           "revision": "2f4e150881d3713eb54986d11cd023cc904525a3",
           "modified": true
         },
@@ -14414,54 +14399,6 @@
         "cpus": "2",
         "memory": "4g",
         "wall_seconds": 3600
-      },
-      {
-        "started": "2026-11-24T07:51:25Z",
-        "image": "cpancompat-static:gperl-v0.3.1",
-        "platform": "linux/arm64",
-        "harness": {
-          "module": "github.com/goccy/go-perl-cpan-testers",
-          "revision": "2f4e150881d3713eb54986d11cd023cc904525a3",
-          "modified": true
-        },
-        "jobs": 4,
-        "cpus": "2",
-        "memory": "4g",
-        "wall_seconds": 3600,
-        "redo": [
-          "blocked",
-          "dist_build_failed",
-          "driver_failed",
-          "link_failed",
-          "link_timeout",
-          "load_failed",
-          "modules_timeout",
-          "needs_environment"
-        ]
-      },
-      {
-        "started": "2026-11-24T09:06:46Z",
-        "image": "cpancompat-static:gperl-v0.3.1",
-        "platform": "linux/arm64",
-        "harness": {
-          "module": "github.com/goccy/go-perl-cpan-testers",
-          "revision": "2f4e150881d3713eb54986d11cd023cc904525a3",
-          "modified": true
-        },
-        "jobs": 4,
-        "cpus": "2",
-        "memory": "4g",
-        "wall_seconds": 3600,
-        "redo": [
-          "blocked",
-          "dist_build_failed",
-          "driver_failed",
-          "link_failed",
-          "link_timeout",
-          "load_failed",
-          "modules_timeout",
-          "needs_environment"
-        ]
       }
     ]
   }

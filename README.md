@@ -31,11 +31,12 @@ go-perl passes 96.3% of what perl passes. Both runs: 16 distributions at a time,
 container with one CPU and 1500 MiB of memory, the test phase of a distribution limited
 to five minutes, on linux/arm64.
 
-The static builds of what passed on go-perl were made with gperl v0.3.1, installed from
-its released module. Of the 13,486 reference distributions that passed, 8,440 build into
-a fully static binary that runs where there is nothing but the binary, and 512 do too,
-linking libraries of the system from their static archives; the site gives the reason
-for each of the others.
+The static builds of what passed on go-perl were made and tested with gperl v0.3.4,
+installed from its released module. Of the 13,486 reference distributions that passed,
+11,029 build into a fully static binary that runs where there is nothing but the binary,
+and 1,643 do too, linking libraries of the system from their static archives; the site
+gives the reason for each of the others. The tests of 11,027 of them pass with their
+test binary (`gperl test -c`) where there is nothing but the binary.
 
 ## Repository layout
 
